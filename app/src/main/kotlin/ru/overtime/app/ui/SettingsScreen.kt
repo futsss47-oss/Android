@@ -59,8 +59,9 @@ fun SettingsScreen(vm: AppViewModel) {
     var message by remember { mutableStateOf<String?>(null) }
 
     val formulaError = Formula.validate(draft.formula)
+    val weekendFormulaError = Formula.validate(draft.weekendFormula)
     val errors = draft.validationErrors()
-    val canSave = formulaError == null && errors.isEmpty()
+    val canSave = formulaError == null && weekendFormulaError == null && errors.isEmpty()
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -174,16 +175,28 @@ fun SettingsScreen(vm: AppViewModel) {
         OutlinedTextField(
             value = draft.formula,
             onValueChange = { draft = draft.copy(formula = it) },
-            label = { Text("Формула оплаты за день") },
+            label = { Text("Формула для рабочих дней") },
             isError = formulaError != null,
             supportingText = { Text(formulaError ?: "Формула корректна") },
             minLines = 2,
             modifier = Modifier.fillMaxWidth(),
         )
         OutlinedButton(onClick = { draft = draft.copy(formula = Settings.DEFAULT_FORMULA) }) {
-            Text("Вернуть формулу по умолчанию")
+            Text("Вернуть формулу рабочих дней по умолчанию")
         }
-        if (formulaError == null) {
+        OutlinedTextField(
+            value = draft.weekendFormula,
+            onValueChange = { draft = draft.copy(weekendFormula = it) },
+            label = { Text("Формула для выходных") },
+            isError = weekendFormulaError != null,
+            supportingText = { Text(weekendFormulaError ?: "Формула корректна") },
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedButton(onClick = { draft = draft.copy(weekendFormula = Settings.DEFAULT_WEEKEND_FORMULA) }) {
+            Text("Вернуть формулу выходных по умолчанию")
+        }
+        if (formulaError == null && weekendFormulaError == null) {
             val weekday = tryMoney(LocalDate.of(2026, 10, 26), 150, draft)
             val weekend = tryMoney(LocalDate.of(2026, 10, 31), 150, draft)
             Text(
@@ -191,6 +204,10 @@ fun SettingsScreen(vm: AppViewModel) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
+        Text(
+            "Выходным считается день, который вы отметили выходным в графике. Для него берётся формула выходных.",
+            style = MaterialTheme.typography.bodySmall,
+        )
         Text("Переменные в формуле:", style = MaterialTheme.typography.titleSmall)
         for ((name, description) in Formula.VARIABLES) {
             Text("$name: $description", style = MaterialTheme.typography.bodySmall)

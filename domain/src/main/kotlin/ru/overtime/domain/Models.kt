@@ -37,7 +37,10 @@ data class Settings(
     val maxAccuracyM: Int = 100,
     val workLat: Double? = null,
     val workLon: Double? = null,
+    /** Формула оплаты за рабочий день. */
     val formula: String = DEFAULT_FORMULA,
+    /** Отдельная формула для выходных дней (по вашему графику). */
+    val weekendFormula: String = DEFAULT_WEEKEND_FORMULA,
     /** Ставка, руб/час. */
     val rate: Double = 0.0,
     /** Оклад, руб/мес (переменная salary в формуле). */
@@ -67,8 +70,11 @@ data class Settings(
     }
 
     companion object {
-        const val DEFAULT_FORMULA =
-            "if(weekend, rate * h * 2, rate * (min(h, 2) * 1.5 + max(h - 2, 0) * 2))"
+        /** Будни: первые 2 часа в полуторном размере, дальше в двойном. */
+        const val DEFAULT_FORMULA = "rate * (min(h, 2) * 1.5 + max(h - 2, 0) * 2)"
+
+        /** Выходные: всё время в двойном размере. */
+        const val DEFAULT_WEEKEND_FORMULA = "rate * h * 2"
 
         fun defaultDays(): Map<DayOfWeek, DayRule> = DayOfWeek.values().associateWith {
             DayRule(workday = it != DayOfWeek.SATURDAY && it != DayOfWeek.SUNDAY)

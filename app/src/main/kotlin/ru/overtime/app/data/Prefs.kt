@@ -64,6 +64,7 @@ object SettingsJson {
         s.workLat?.let { o.put("lat", it) }
         s.workLon?.let { o.put("lon", it) }
         o.put("formula", s.formula)
+        o.put("weekendFormula", s.weekendFormula)
         o.put("rate", s.rate)
         o.put("salary", s.salary)
         o.put("norm", s.normHours)
@@ -98,6 +99,7 @@ object SettingsJson {
             workLat = if (o.has("lat")) o.getDouble("lat") else null,
             workLon = if (o.has("lon")) o.getDouble("lon") else null,
             formula = o.optString("formula", d.formula),
+            weekendFormula = o.optString("weekendFormula", d.weekendFormula),
             rate = o.optDouble("rate", d.rate),
             salary = o.optDouble("salary", d.salary),
             normHours = o.optDouble("norm", d.normHours),

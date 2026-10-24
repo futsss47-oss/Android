@@ -156,9 +156,33 @@ class CalculatorTest {
         assertEquals(500.0 + 400.0, r.totalMoney)
         assertNull(r.formulaError)
 
-        val bad = Calculator.report(MON, SAT, spans, Settings(formula = "rate * ("))
+        // сломана только формула рабочих дней: будни дают ошибку, выходной считается по своей формуле
+        val bad = Calculator.report(MON, SAT, spans, Settings(rate = 100.0, formula = "rate * ("))
         assertNotNull(bad.formulaError)
-        assertEquals(0.0, bad.totalMoney)
+        assertEquals(400.0, bad.totalMoney)
+    }
+
+    @Test
+    fun weekendUsesOwnFormula() {
+        val s = Settings(
+            rate = 100.0,
+            formula = "rate * h * 1.5",
+            weekendFormula = "rate * h * 3 + 50",
+        )
+        assertEquals(450.0, Calculator.money(MON, 180, s))  // будни: 100 * 3 * 1.5
+        assertEquals(950.0, Calculator.money(SAT, 180, s))  // выходной: 100 * 3 * 3 + 50
+        // выходной по графику, даже если это будний день недели
+        val monOff = s.copy(days = s.days + (DayOfWeek.MONDAY to DayRule(false)))
+        assertEquals(950.0, Calculator.money(MON, 180, monOff))
+    }
+
+    @Test
+    fun defaultFormulasAreDoublePayOnWeekends() {
+        val s = Settings(rate = 200.0)
+        // выходной: час в двойном размере
+        assertEquals(400.0, Calculator.money(SAT, 60, s))
+        // будни: первые два часа ×1.5, третий ×2
+        assertEquals(200.0 * (2 * 1.5 + 1 * 2), Calculator.money(MON, 180, s))
     }
 }
 
@@ -213,6 +237,7 @@ class FormulaTest {
     @Test
     fun validate() {
         assertNull(Formula.validate(Settings.DEFAULT_FORMULA))
+        assertNull(Formula.validate(Settings.DEFAULT_WEEKEND_FORMULA))
         assertNull(Formula.validate("salary / norm * 1.5 * h"))
         assertNotNull(Formula.validate("rate * (h"))
         assertNotNull(Formula.validate("hours * 2"))

@@ -58,16 +58,18 @@ object Calculator {
 
     fun money(date: LocalDate, countedMinutes: Int, s: Settings): Double {
         if (countedMinutes <= 0) return 0.0
+        val dayOff = !s.rule(date.dayOfWeek).workday
         val vars = mapOf(
             "h" to countedMinutes / 60.0,
             "m" to countedMinutes.toDouble(),
             "rate" to s.rate,
             "salary" to s.salary,
             "norm" to s.normHours,
-            "weekend" to if (s.rule(date.dayOfWeek).workday) 0.0 else 1.0,
+            "weekend" to if (dayOff) 1.0 else 0.0,
             "dow" to date.dayOfWeek.value.toDouble(),
         )
-        val raw = Formula.evaluate(s.formula, vars)
+        // В выходной день считаем по формуле для выходных, в рабочий по обычной.
+        val raw = Formula.evaluate(if (dayOff) s.weekendFormula else s.formula, vars)
         return Math.round(raw * 100.0) / 100.0
     }
 
