@@ -33,10 +33,12 @@ import ru.overtime.domain.Calculator
 import ru.overtime.domain.DayRule
 import ru.overtime.domain.Formula
 import ru.overtime.domain.OvertimeMode
+import ru.overtime.domain.ProductionCalendar
 import ru.overtime.domain.RoundMode
 import ru.overtime.domain.Settings
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.YearMonth
 
 private fun Settings.withRule(day: DayOfWeek, rule: DayRule): Settings = copy(days = days + (day to rule))
 
@@ -169,9 +171,32 @@ fun SettingsScreen(vm: AppViewModel) {
 
         // ---- деньги ----
         Section("Оплата")
-        DecimalField("Ставка в час", draft.rate, "₽") { draft = draft.copy(rate = it) }
         DecimalField("Оклад в месяц", draft.salary, "₽") { draft = draft.copy(salary = it) }
-        DecimalField("Норма часов в месяце", draft.normHours, "ч") { draft = draft.copy(normHours = it) }
+        DecimalField("Премия в месяц (без сверхурочных)", draft.bonus, "₽") { draft = draft.copy(bonus = it) }
+        DecimalField("Районный коэффициент", draft.districtPercent, "%") { draft = draft.copy(districtPercent = it) }
+        DecimalField("НДФЛ", draft.taxPercent, "%") { draft = draft.copy(taxPercent = it) }
+        val thisMonth = YearMonth.now()
+        val norm = draft.normFor(thisMonth)
+        Text(
+            "Часовая ставка считается сама: оклад / норма часов месяца. " +
+                "Сейчас (${thisMonth.format(MONTH_FMT)}): норма ${formatHours(norm)}, ставка " +
+                formatMoney(draft.hourlyRate(thisMonth)) + " в час.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            "Норма берётся из производственного календаря Республики Башкортостан: праздники, переносы, " +
+                "Ураза-байрам, Курбан-байрам, День Республики 11 октября. Норму и премию конкретного месяца " +
+                "можно поправить на вкладке «Месяц».",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        ProductionCalendar.note(thisMonth.year)?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+        Text(
+            "Районный коэффициент начисляется на оклад, премию, выходные и сверхурочные, " +
+                "НДФЛ удерживается из всей суммы.",
+            style = MaterialTheme.typography.bodySmall,
+        )
         OutlinedTextField(
             value = draft.formula,
             onValueChange = { draft = draft.copy(formula = it) },
@@ -197,15 +222,20 @@ fun SettingsScreen(vm: AppViewModel) {
             Text("Вернуть формулу выходных по умолчанию")
         }
         if (formulaError == null && weekendFormulaError == null) {
-            val weekday = tryMoney(LocalDate.of(2026, 10, 26), 150, draft)
-            val weekend = tryMoney(LocalDate.of(2026, 10, 31), 150, draft)
+            val days = (1..thisMonth.lengthOfMonth()).map { thisMonth.atDay(it) }
+            val workDay = days.firstOrNull { draft.ruleFor(it).workday }
+            val offDay = days.firstOrNull { !draft.ruleFor(it).workday }
+            val weekday = workDay?.let { tryMoney(it, 150, draft) } ?: "нет рабочих дней"
+            val weekend = offDay?.let { tryMoney(it, 480, draft) } ?: "нет выходных"
             Text(
-                "Проверка: 2 ч 30 мин в будний день = $weekday, в выходной = $weekend",
+                "Проверка по формулам (до районного коэффициента): 2 ч 30 мин сверхурочных в будний день = $weekday, " +
+                    "8 ч в выходной = $weekend",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         Text(
-            "Выходным считается день, который вы отметили выходным в графике. Для него берётся формула выходных.",
+            "Выходным считается нерабочий день по календарю РБ (суббота, воскресенье, праздник, перенос) " +
+                "или день, отмеченный выходным в вашем графике. Для него берётся формула выходных.",
             style = MaterialTheme.typography.bodySmall,
         )
         Text("Переменные в формуле:", style = MaterialTheme.typography.titleSmall)

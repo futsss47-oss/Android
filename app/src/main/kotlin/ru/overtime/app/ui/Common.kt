@@ -45,6 +45,11 @@ fun formatMinutes(min: Int): String {
 
 fun formatMoney(v: Double): String = String.format(RU, "%,.2f ₽", v)
 
+fun formatHours(v: Double): String =
+    if (v == Math.floor(v)) "${v.toLong()} ч" else String.format(RU, "%.1f ч", v)
+
+val MONTH_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("LLLL yyyy", RU)
+
 fun dayShort(d: LocalDate): String = d.dayOfWeek.getDisplayName(TextStyle.SHORT, RU)
 
 fun pickDateTime(ctx: Context, initial: LocalDateTime, onPicked: (LocalDateTime) -> Unit) {

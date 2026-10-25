@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.overtime.app.data.SessionEntity
 import ru.overtime.app.data.TimeConv
+import ru.overtime.domain.Calculator
 import java.time.Duration
 import java.time.LocalDateTime
 import java.time.YearMonth
@@ -42,8 +43,13 @@ fun MonthScreen(vm: AppViewModel) {
     val sessions by vm.sessions.collectAsStateWithLifecycle()
     val now by vm.clock.collectAsStateWithLifecycle()
 
+    val settings by vm.settings.collectAsStateWithLifecycle()
+
     var editing by remember { mutableStateOf<SessionEntity?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var editingMonth by remember { mutableStateOf(false) }
+
+    val summary = remember(month, report, settings) { Calculator.monthSummary(month, report, settings) }
 
     val monthSessions = sessions.filter { YearMonth.from(TimeConv.toLocal(it.startMillis)) == month }
     val monthTitle = month.format(DateTimeFormatter.ofPattern("LLLL yyyy", RU))
@@ -65,16 +71,12 @@ fun MonthScreen(vm: AppViewModel) {
             }
         }
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Итого: ${formatMinutes(report.totalMinutes)}", style = MaterialTheme.typography.titleMedium)
-                Text("К оплате: ${formatMoney(report.totalMoney)}", style = MaterialTheme.typography.titleMedium)
-                report.formulaError?.let {
-                    Text("Ошибка в формуле: $it", color = MaterialTheme.colorScheme.error)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { shareCsv(ctx, monthTitle, report) }) { Text("Поделиться таблицей") }
-                    Button(onClick = { adding = true }) { Text("Добавить запись") }
-                }
+            MonthSummaryCard(summary, report, settings.districtPercent, settings.taxPercent) { editingMonth = true }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { shareCsv(ctx, monthTitle, report, summary) }) { Text("Поделиться таблицей") }
+                Button(onClick = { adding = true }) { Text("Добавить запись") }
             }
         }
 
@@ -95,7 +97,7 @@ fun MonthScreen(vm: AppViewModel) {
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     Text(formatMinutes(day.countedMinutes))
-                    Text(formatMoney(day.money), style = MaterialTheme.typography.bodySmall)
+                    Text(formatMoney(day.gross), style = MaterialTheme.typography.bodySmall)
                 }
             }
             HorizontalDivider()
@@ -129,6 +131,18 @@ fun MonthScreen(vm: AppViewModel) {
         }
     }
 
+    if (editingMonth) {
+        MonthParamsDialog(
+            summary = summary,
+            autoNorm = ru.overtime.domain.ProductionCalendar.normHours(month).toDouble(),
+            defaultBonus = settings.bonus,
+            onDismiss = { editingMonth = false },
+            onSave = { norm, bonus ->
+                vm.saveMonthOverride(month, norm, bonus)
+                editingMonth = false
+            },
+        )
+    }
     if (adding) {
         SessionDialog(
             initial = null,
@@ -210,19 +224,32 @@ private fun SessionDialog(
     )
 }
 
-private fun shareCsv(ctx: android.content.Context, title: String, report: ru.overtime.domain.Report) {
+private fun shareCsv(
+    ctx: android.content.Context,
+    title: String,
+    report: ru.overtime.domain.Report,
+    summary: ru.overtime.domain.MonthSummary,
+) {
+    fun n(v: Double) = String.format(RU, "%.2f", v)
     val csv = buildString {
-        appendLine("Дата;Минут;Часов;Сумма, руб")
+        appendLine("Дата;Минут;Часов;Выходной;По формуле, руб;С районным, руб")
         for (d in report.days) {
             appendLine(
-                "${d.date};${d.countedMinutes};" +
-                    String.format(RU, "%.2f", d.countedMinutes / 60.0) + ";" +
-                    String.format(RU, "%.2f", d.money),
+                "${d.date};${d.countedMinutes};${n(d.countedMinutes / 60.0)};" +
+                    (if (d.dayOff) "да" else "нет") + ";${n(d.money)};${n(d.gross)}",
             )
         }
-        appendLine("Итого;${report.totalMinutes};" +
-            String.format(RU, "%.2f", report.totalMinutes / 60.0) + ";" +
-            String.format(RU, "%.2f", report.totalMoney))
+        appendLine("Итого;${report.totalMinutes};${n(report.totalMinutes / 60.0)};;${n(report.totalMoney)};${n(report.totalGross)}")
+        appendLine()
+        appendLine("Норма часов;${n(summary.norm)}")
+        appendLine("Ставка в час;${n(summary.rate)}")
+        appendLine("Оклад;${n(summary.salary)}")
+        appendLine("Премия;${n(summary.bonus)}")
+        appendLine("Выходные и сверхурочные;${n(summary.extra)}")
+        appendLine("Районный коэффициент;${n(summary.district)}")
+        appendLine("Начислено;${n(summary.gross)}")
+        appendLine("НДФЛ;${n(summary.tax)}")
+        appendLine("На руки;${n(summary.net)}")
     }
     val send = Intent(Intent.ACTION_SEND)
         .setType("text/plain")

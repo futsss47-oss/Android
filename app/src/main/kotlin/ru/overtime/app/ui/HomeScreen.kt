@@ -31,6 +31,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import ru.overtime.app.location.Perms
+import ru.overtime.domain.Calculator
+import java.time.YearMonth
 import java.time.Duration
 import android.Manifest
 
@@ -41,6 +43,9 @@ fun HomeScreen(vm: AppViewModel) {
     val now by vm.clock.collectAsStateWithLifecycle()
     val sessions by vm.sessions.collectAsStateWithLifecycle()
     val report by vm.homeReport.collectAsStateWithLifecycle()
+
+    val thisMonth = YearMonth.from(now)
+    val summary = remember(report, settings, thisMonth) { Calculator.monthSummary(thisMonth, report, settings) }
 
     val manualOpen = sessions.firstOrNull { it.manual && it.endMillis == null }
     val today = report.days.firstOrNull { it.date == now.toLocalDate() }
@@ -93,7 +98,7 @@ fun HomeScreen(vm: AppViewModel) {
                 if (today == null) {
                     Text("Сверхурочной нет")
                 } else {
-                    Text("${formatMinutes(today.countedMinutes)}, ${formatMoney(today.money)}")
+                    Text("${formatMinutes(today.countedMinutes)}, ${formatMoney(today.gross)} с районным коэффициентом")
                     if (today.rawMinutes != today.countedMinutes) {
                         Text(
                             "Фактически ${formatMinutes(today.rawMinutes)}, округлено по настройкам",
@@ -107,7 +112,12 @@ fun HomeScreen(vm: AppViewModel) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Этот месяц", style = MaterialTheme.typography.titleMedium)
-                Text("${formatMinutes(report.totalMinutes)}, ${formatMoney(report.totalMoney)}")
+                Text("Выходные и сверхурочные: ${formatMinutes(report.totalMinutes)}, +${formatMoney(report.totalGross)}")
+                Text("Ожидается на руки: ${formatMoney(summary.net)}", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Начислено ${formatMoney(summary.gross)}: оклад, премия, районный коэффициент. Подробно на вкладке «Месяц».",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 report.formulaError?.let {
                     Text("Ошибка в формуле: $it", color = MaterialTheme.colorScheme.error)
                 }

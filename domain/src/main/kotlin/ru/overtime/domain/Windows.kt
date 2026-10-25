@@ -22,7 +22,7 @@ object Windows {
     fun forDate(date: LocalDate, s: Settings): List<TimeWindow> {
         val d0 = date.atStartOfDay()
         val d1 = date.plusDays(1).atStartOfDay()
-        val rule = s.rule(date.dayOfWeek)
+        val rule = s.ruleFor(date)
         val result = mutableListOf<TimeWindow>()
 
         if (!rule.workday) {
@@ -51,7 +51,7 @@ object Windows {
         forDate(t.toLocalDate(), s).firstOrNull { !t.isBefore(it.start) && t.isBefore(it.end) }
 
     private fun windowReachesMidnight(date: LocalDate, s: Settings): Boolean {
-        val rule = s.rule(date.dayOfWeek)
+        val rule = s.ruleFor(date)
         if (!rule.workday) return s.weekendAllOvertime
         val afterStart = date.atTime(rule.end).plusMinutes(s.graceAfterShiftMinutes.toLong())
         return afterStart.isBefore(date.plusDays(1).atStartOfDay())

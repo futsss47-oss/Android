@@ -28,6 +28,7 @@ import ru.overtime.app.data.TimeConv
 import ru.overtime.app.location.GeofenceHelper
 import ru.overtime.app.location.Perms
 import ru.overtime.domain.Calculator
+import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.Report
 import ru.overtime.domain.Settings
 import ru.overtime.domain.TrackerState
@@ -83,6 +84,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         GeofenceHelper.register(app, s)
     }
 
+    /** Правка нормы часов и премии для одного месяца. null = автоматически / из общих настроек. */
+    fun saveMonthOverride(month: YearMonth, norm: Double?, bonus: Double?) {
+        val s = app.settingsRepo.current()
+        val map = s.monthOverrides.toMutableMap()
+        val o = MonthOverride(norm = norm, bonus = bonus)
+        if (o.isEmpty) map.remove(month.toString()) else map[month.toString()] = o
+        app.settingsRepo.save(s.copy(monthOverrides = map))
+    }
+
     @SuppressLint("MissingPermission")
     suspend fun currentLocation(): Location? {
         if (!Perms.hasFine(app)) return null
@@ -136,6 +146,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private fun nowMillis(): Long = System.currentTimeMillis()
 
     private companion object {
-        val EMPTY_REPORT = Report(emptyList(), 0, 0.0, null)
+        val EMPTY_REPORT = Report(emptyList(), 0, 0.0, 0.0, null)
     }
 }

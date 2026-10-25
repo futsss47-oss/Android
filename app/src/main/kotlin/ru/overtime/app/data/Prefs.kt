@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 import ru.overtime.domain.DayRule
+import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.OvertimeMode
 import ru.overtime.domain.RoundMode
 import ru.overtime.domain.Settings
@@ -65,9 +66,19 @@ object SettingsJson {
         s.workLon?.let { o.put("lon", it) }
         o.put("formula", s.formula)
         o.put("weekendFormula", s.weekendFormula)
-        o.put("rate", s.rate)
         o.put("salary", s.salary)
-        o.put("norm", s.normHours)
+        o.put("bonus", s.bonus)
+        o.put("district", s.districtPercent)
+        o.put("tax", s.taxPercent)
+        val months = JSONObject()
+        for ((key, m) in s.monthOverrides) {
+            if (m.isEmpty) continue
+            val mj = JSONObject()
+            m.norm?.let { mj.put("norm", it) }
+            m.bonus?.let { mj.put("bonus", it) }
+            months.put(key, mj)
+        }
+        o.put("months", months)
         return o.toString()
     }
 
@@ -100,14 +111,30 @@ object SettingsJson {
             workLon = if (o.has("lon")) o.getDouble("lon") else null,
             formula = o.optString("formula", d.formula),
             weekendFormula = o.optString("weekendFormula", d.weekendFormula),
-            rate = o.optDouble("rate", d.rate),
             salary = o.optDouble("salary", d.salary),
-            normHours = o.optDouble("norm", d.normHours),
+            bonus = o.optDouble("bonus", d.bonus),
+            districtPercent = o.optDouble("district", d.districtPercent),
+            taxPercent = o.optDouble("tax", d.taxPercent),
+            monthOverrides = decodeMonths(o.optJSONObject("months")),
         )
     }
 
     private inline fun <reified E : Enum<E>> enumOr(name: String, default: E): E =
         enumValues<E>().firstOrNull { it.name == name } ?: default
+
+    private fun decodeMonths(json: JSONObject?): Map<String, MonthOverride> {
+        if (json == null) return emptyMap()
+        val result = mutableMapOf<String, MonthOverride>()
+        for (key in json.keys()) {
+            val mj = json.optJSONObject(key) ?: continue
+            val m = MonthOverride(
+                norm = if (mj.has("norm")) mj.getDouble("norm") else null,
+                bonus = if (mj.has("bonus")) mj.getDouble("bonus") else null,
+            )
+            if (!m.isEmpty) result[key] = m
+        }
+        return result
+    }
 }
 
 /** Состояние движка хранится отдельно, потому что система может убить сервис в любой момент. */

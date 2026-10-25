@@ -1,8 +1,10 @@
 package ru.overtime.domain
 
 import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.YearMonth
 
 /** Как считать сверхурочную: только после конца смены или ещё и до начала. */
 enum class OvertimeMode { AFTER_SHIFT, BEFORE_AND_AFTER }
@@ -15,6 +17,11 @@ data class DayRule(
     val start: LocalTime = LocalTime.of(8, 0),
     val end: LocalTime = LocalTime.of(17, 0),
 )
+
+/** Правка параметров одного месяца. null означает «взять автоматически / из общих настроек». */
+data class MonthOverride(val norm: Double? = null, val bonus: Double? = null) {
+    val isEmpty: Boolean get() = norm == null && bonus == null
+}
 
 /** Все настройки приложения. Деньги везде в рублях. */
 data class Settings(
@@ -41,14 +48,59 @@ data class Settings(
     val formula: String = DEFAULT_FORMULA,
     /** Отдельная формула для выходных дней (по вашему графику). */
     val weekendFormula: String = DEFAULT_WEEKEND_FORMULA,
-    /** Ставка, руб/час. */
-    val rate: Double = 0.0,
-    /** Оклад, руб/мес (переменная salary в формуле). */
+    /** Оклад, руб/мес. Часовая ставка = оклад / норма часов месяца, считается сама. */
     val salary: Double = 0.0,
-    /** Норма часов в месяце (переменная norm в формуле). */
-    val normHours: Double = 0.0,
+    /** Месячная премия без сверхурочных, руб. Для конкретного месяца её можно поправить. */
+    val bonus: Double = 0.0,
+    /** Районный коэффициент, %. Начисляется на оклад, премию, выходные и сверхурочные. */
+    val districtPercent: Double = 15.0,
+    /** НДФЛ, %. */
+    val taxPercent: Double = 13.0,
+    /** Правки норма часов и премии по месяцам. Ключ вида «2026-10». */
+    val monthOverrides: Map<String, MonthOverride> = emptyMap(),
 ) {
     fun rule(day: DayOfWeek): DayRule = days[day] ?: DayRule(false)
+
+    /**
+     * Правило конкретной даты с учётом производственного календаря РБ:
+     * праздники и перенесённые выходные нерабочие, перенесённые рабочие субботы рабочие,
+     * в сокращённый день смена на час короче.
+     */
+    fun ruleFor(date: LocalDate): DayRule {
+        val hours = ProductionCalendar.hours(date)
+        if (hours == 0) return DayRule(false)
+        val base = rule(date.dayOfWeek)
+        val weekendDay = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
+        val template = when {
+            base.workday -> base
+            weekendDay -> workdayTemplate() ?: return DayRule(false)
+            else -> return DayRule(false)
+        }
+        if (hours >= 8) return template
+        val shortEnd = template.end.minusHours(1)
+        return if (shortEnd.isAfter(template.start)) template.copy(end = shortEnd) else template
+    }
+
+    private fun workdayTemplate(): DayRule? =
+        listOf(DayOfWeek.FRIDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY, DayOfWeek.THURSDAY)
+            .map { rule(it) }
+            .firstOrNull { it.workday }
+
+    /** Норма часов месяца: правка пользователя или расчёт по календарю. */
+    fun normFor(month: YearMonth): Double =
+        monthOverrides[month.toString()]?.norm ?: ProductionCalendar.normHours(month).toDouble()
+
+    fun normIsAuto(month: YearMonth): Boolean = monthOverrides[month.toString()]?.norm == null
+
+    fun bonusFor(month: YearMonth): Double = monthOverrides[month.toString()]?.bonus ?: bonus
+
+    fun bonusIsAuto(month: YearMonth): Boolean = monthOverrides[month.toString()]?.bonus == null
+
+    /** Часовая ставка месяца = оклад / норма часов. */
+    fun hourlyRate(month: YearMonth): Double {
+        val norm = normFor(month)
+        return if (norm > 0) salary / norm else 0.0
+    }
 
     val hasWorkPlace: Boolean get() = workLat != null && workLon != null
 
@@ -65,6 +117,12 @@ data class Settings(
         if (pollIntervalMinutes < 1) errors += "Интервал опроса должен быть не меньше 1 минуты"
         if (graceAfterShiftMinutes < 0 || minOvertimeMinutes < 0 || mergeGapMinutes < 0) {
             errors += "Значения в минутах не могут быть отрицательными"
+        }
+        if (salary < 0 || bonus < 0) errors += "Оклад и премия не могут быть отрицательными"
+        if (districtPercent < 0 || districtPercent > 100) errors += "Районный коэффициент должен быть от 0 до 100%"
+        if (taxPercent < 0 || taxPercent > 100) errors += "НДФЛ должен быть от 0 до 100%"
+        for ((key, o) in monthOverrides) {
+            if ((o.norm ?: 0.0) < 0 || (o.bonus ?: 0.0) < 0) errors += "Отрицательное значение в правке месяца $key"
         }
         return errors
     }
