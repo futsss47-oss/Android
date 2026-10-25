@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Patients" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:colorAccent">@color/green</item>
+    </style>
+    <color name="bg">#F5FAF6</color>
+    <color name="green">#2E8B57</color>
+    <color name="icon_bg">#E3F4E8</color>
+</resources>
