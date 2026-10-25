@@ -5,6 +5,9 @@ plugins {
     id("com.google.devtools.ksp")
 }
 
+val runNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+val releaseStoreFile: String? = System.getenv("RELEASE_STORE_FILE")
+
 android {
     namespace = "ru.overtime.app"
     compileSdk = 35
@@ -13,17 +16,27 @@ android {
         applicationId = "ru.overtime.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // Номер версии растёт с каждой сборкой на GitHub: RuStore принимает только версии с большим номером.
+        versionCode = runNumber
+        versionName = "1.0.$runNumber"
     }
 
-    // Постоянный ключ для debug-сборок: каждая новая сборка с GitHub ставится поверх старой.
     signingConfigs {
+        // Постоянный ключ для debug-сборок (только для проверки, не для магазина).
         getByName("debug") {
             storeFile = file("debug.keystore")
             storePassword = "android"
             keyAlias = "androiddebugkey"
             keyPassword = "android"
+        }
+        // Release-ключ берётся из секретов GitHub; в репозитории его нет.
+        create("release") {
+            if (releaseStoreFile != null) {
+                storeFile = file(releaseStoreFile)
+                storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: "overtime"
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: System.getenv("RELEASE_STORE_PASSWORD")
+            }
         }
     }
 
@@ -33,6 +46,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            if (releaseStoreFile != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 

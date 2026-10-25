@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    env:
+      HAS_RELEASE_KEY: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' && secrets.RELEASE_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -35,10 +37,44 @@ jobs:
       - name: Права на запуск gradlew
         run: chmod +x gradlew
 
-      - name: Тесты логики и сборка debug APK
+      - name: Тесты логики и debug APK
         run: ./gradlew :domain:test :app:assembleDebug --stacktrace
 
-      - name: Выложить APK
+      - name: Release-ключ из секретов
+        if: env.HAS_RELEASE_KEY == 'true'
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "RELEASE_STORE_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
+          echo "RELEASE_KEY_ALIAS=overtime" >> "$GITHUB_ENV"
+
+      - name: Подписанный release APK
+        if: env.HAS_RELEASE_KEY == 'true'
+        run: ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Отпечаток подписи
+        if: env.HAS_RELEASE_KEY == 'true'
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          FP=$("$APKSIGNER" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -m1 "SHA-256 digest" | awk '{print $NF}')
+          echo "::notice title=Подпись release::SHA-256 $FP"
+
+      - name: Выложить release APK
+        if: env.HAS_RELEASE_KEY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: overtime-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Нет release-ключа
+        if: env.HAS_RELEASE_KEY != 'true'
+        run: echo "::warning title=Release не собран::Добавьте секреты RELEASE_KEYSTORE_BASE64 и RELEASE_PASSWORD, чтобы собирать подписанный APK для RuStore."
+
+      - name: Выложить debug APK
         uses: actions/upload-artifact@v4
         with:
           name: overtime-debug-apk
