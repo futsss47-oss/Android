@@ -14,7 +14,8 @@
     <application
         android:name=".OvertimeApp"
         android:allowBackup="false"
-        android:icon="@android:drawable/ic_menu_recent_history"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.Overtime">
@@ -35,6 +36,21 @@
 
         <receiver
             android:name=".location.GeofenceReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".widget.OvertimeWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/overtime_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".reminder.MonthReminderReceiver"
             android:exported="false" />
 
         <receiver

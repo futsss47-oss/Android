@@ -42,6 +42,9 @@ interface SessionDao {
     @Query("SELECT * FROM sessions ORDER BY startMillis DESC")
     fun observeAll(): Flow<List<SessionEntity>>
 
+    @Query("SELECT * FROM sessions ORDER BY startMillis DESC")
+    fun all(): List<SessionEntity>
+
     @Insert
     fun insert(e: SessionEntity): Long
 

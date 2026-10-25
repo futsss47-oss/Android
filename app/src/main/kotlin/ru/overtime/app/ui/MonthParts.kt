@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -38,9 +38,9 @@ fun MonthSummaryCard(
     taxPercent: Double,
     onEdit: () -> Unit,
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Расчёт месяца", style = MaterialTheme.typography.titleMedium)
+    SoftCard {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Расчёт как в листке", style = MaterialTheme.typography.titleMedium)
             SummaryLine(
                 "Норма часов",
                 formatHours(summary.norm) + if (summary.normIsAuto) " (календарь РБ)" else " (вручную)",
@@ -67,7 +67,7 @@ fun MonthSummaryCard(
                 "Оклад и премия плановые: больничные, отпуска и разовые начисления приложение не учитывает.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            TextButton(onClick = onEdit) { Text("Изменить норму или премию месяца") }
+            FilledTonalButton(onClick = onEdit) { Text("Изменить норму или премию месяца") }
         }
     }
 }

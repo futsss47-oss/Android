@@ -53,6 +53,7 @@ object SettingsJson {
         o.put("days", days)
         o.put("mode", s.mode.name)
         o.put("weekendAll", s.weekendAllOvertime)
+        o.put("reminder", s.monthReminder)
         o.put("lunchOn", s.lunchEnabled)
         o.put("lunchS", s.lunchStart.toString())
         o.put("lunchE", s.lunchEnd.toString())
@@ -101,6 +102,7 @@ object SettingsJson {
             days = days,
             mode = enumOr(o.optString("mode"), d.mode),
             weekendAllOvertime = o.optBoolean("weekendAll", d.weekendAllOvertime),
+            monthReminder = o.optBoolean("reminder", d.monthReminder),
             lunchEnabled = o.optBoolean("lunchOn", d.lunchEnabled),
             lunchStart = LocalTime.parse(o.optString("lunchS", d.lunchStart.toString())),
             lunchEnd = LocalTime.parse(o.optString("lunchE", d.lunchEnd.toString())),

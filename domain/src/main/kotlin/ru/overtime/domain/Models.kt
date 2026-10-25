@@ -60,7 +60,9 @@ data class Settings(
     val districtPercent: Double = 15.0,
     /** НДФЛ, %. */
     val taxPercent: Double = 13.0,
-    /** Правки норма часов и премии по месяцам. Ключ вида «2026-10». */
+    /** Напоминание в последний день месяца сверить расчёт с листком. */
+    val monthReminder: Boolean = true,
+    /** Правки нормы часов и премии по месяцам. Ключ вида «2026-10». */
     val monthOverrides: Map<String, MonthOverride> = emptyMap(),
 ) {
     fun rule(day: DayOfWeek): DayRule = days[day] ?: DayRule(false)

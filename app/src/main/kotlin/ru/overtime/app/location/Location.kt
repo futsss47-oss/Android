@@ -31,6 +31,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import ru.overtime.app.MainActivity
 import ru.overtime.app.OvertimeApp
+import ru.overtime.app.R
+import ru.overtime.app.reminder.MonthReminder
 import ru.overtime.app.data.SettingsRepository
 import ru.overtime.domain.Settings
 import ru.overtime.domain.TrackerState
@@ -103,7 +105,9 @@ class GeofenceReceiver : BroadcastReceiver() {
 /** После перезагрузки телефона или обновления приложения геозоны надо зарегистрировать заново. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        GeofenceHelper.register(context, SettingsRepository(context).current())
+        val settings = SettingsRepository(context).current()
+        GeofenceHelper.register(context, settings)
+        MonthReminder.schedule(context, settings)
     }
 }
 
@@ -196,7 +200,7 @@ class TrackingService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notification: Notification = NotificationCompat.Builder(this, OvertimeApp.CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_stat_clock)
             .setContentTitle("Учёт сверхурочных")
             .setContentText(text)
             .setContentIntent(open)

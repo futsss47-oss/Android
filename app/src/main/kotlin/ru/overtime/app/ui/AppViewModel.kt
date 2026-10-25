@@ -27,6 +27,7 @@ import ru.overtime.app.data.SessionEntity
 import ru.overtime.app.data.TimeConv
 import ru.overtime.app.location.GeofenceHelper
 import ru.overtime.app.location.Perms
+import ru.overtime.app.reminder.MonthReminder
 import ru.overtime.domain.Calculator
 import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.Report
@@ -82,6 +83,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSettings(s: Settings) {
         app.settingsRepo.save(s)
         GeofenceHelper.register(app, s)
+        MonthReminder.schedule(app, s)
     }
 
     /** Правка нормы часов и премии для одного месяца. null = автоматически / из общих настроек. */

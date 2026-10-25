@@ -588,3 +588,15 @@ class LunchTest {
         assertTrue(bad.copy(lunchEnabled = false).validationErrors().isEmpty())
     }
 }
+
+class ReminderTimeTest {
+    @Test
+    fun lastDayOfMonthAt18() {
+        assertEquals(LocalDateTime.of(2026, 10, 31, 18, 0), ReminderTime.next(LocalDateTime.of(2026, 10, 25, 9, 0)))
+        assertEquals(LocalDateTime.of(2026, 10, 31, 18, 0), ReminderTime.next(LocalDateTime.of(2026, 10, 31, 17, 59)))
+        // уже прошло: следующий месяц
+        assertEquals(LocalDateTime.of(2026, 11, 30, 18, 0), ReminderTime.next(LocalDateTime.of(2026, 10, 31, 18, 0)))
+        assertEquals(LocalDateTime.of(2027, 2, 28, 18, 0), ReminderTime.next(LocalDateTime.of(2027, 1, 31, 20, 0)))
+        assertEquals(LocalDateTime.of(2027, 1, 31, 18, 0), ReminderTime.next(LocalDateTime.of(2026, 12, 31, 19, 0)))
+    }
+}

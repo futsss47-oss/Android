@@ -1,31 +1,31 @@
 package ru.overtime.app
 
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DateRange
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.viewmodel.compose.viewModel
+import ru.overtime.app.ui.AppTheme
 import ru.overtime.app.ui.AppViewModel
 import ru.overtime.app.ui.HomeScreen
 import ru.overtime.app.ui.MonthScreen
@@ -41,32 +41,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@Composable
-fun AppTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val ctx = LocalContext.current
-    val scheme = when {
-        Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(ctx)
-        Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
-}
+private data class Tab(val title: String, val icon: ImageVector)
 
 @Composable
 fun Root(vm: AppViewModel = viewModel()) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val tabs = listOf("🏠" to "Главная", "📅" to "Месяц", "⚙️" to "Настройки")
+    val tabs = listOf(
+        Tab("Главная", Icons.Rounded.Home),
+        Tab("Месяц", Icons.Rounded.DateRange),
+        Tab("Настройки", Icons.Rounded.Settings),
+    )
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.surface,
         bottomBar = {
-            NavigationBar {
-                tabs.forEachIndexed { index, (icon, title) ->
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                tabs.forEachIndexed { index, t ->
                     NavigationBarItem(
                         selected = tab == index,
                         onClick = { tab = index },
-                        icon = { Text(icon) },
-                        label = { Text(title) },
+                        icon = { Icon(t.icon, contentDescription = t.title) },
+                        label = { Text(t.title) },
                     )
                 }
             }

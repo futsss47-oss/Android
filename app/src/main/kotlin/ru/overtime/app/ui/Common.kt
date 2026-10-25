@@ -45,6 +45,9 @@ fun formatMinutes(min: Int): String {
 
 fun formatMoney(v: Double): String = String.format(RU, "%,.2f ₽", v)
 
+/** Рубли без копеек: для виджета и кратких сводок. */
+fun formatRub(v: Double): String = String.format(RU, "%,.0f ₽", v)
+
 fun formatHours(v: Double): String =
     if (v == Math.floor(v)) "${v.toLong()} ч" else String.format(RU, "%.1f ч", v)
 

@@ -3,11 +3,18 @@ package ru.overtime.app
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.os.Build
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.launch
 import ru.overtime.app.data.AppDatabase
 import ru.overtime.app.data.PrefsStateStore
 import ru.overtime.app.data.RoomSessionGateway
 import ru.overtime.app.data.SettingsRepository
+import ru.overtime.app.reminder.MonthReminder
+import ru.overtime.app.widget.WidgetUpdater
 import ru.overtime.domain.Geo
 import ru.overtime.domain.OvertimeEngine
 import ru.overtime.domain.Reading
@@ -21,9 +28,13 @@ class OvertimeApp : Application() {
         private set
     private lateinit var engine: OvertimeEngine
 
+    /** Фоновые задачи приложения: обновление виджета, напоминания. */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     /** Движок вызывается из сервиса, ресивера и интерфейса, поэтому все обращения идут под одним замком. */
     private val lock = Any()
 
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     override fun onCreate() {
         super.onCreate()
         db = AppDatabase.build(this)
@@ -33,7 +44,15 @@ class OvertimeApp : Application() {
             gateway = RoomSessionGateway(db.sessionDao()),
             store = PrefsStateStore(this),
         )
-        createChannel()
+        createChannels()
+        MonthReminder.schedule(this, settingsRepo.current())
+
+        // Виджет обновляется при любом изменении записей или настроек.
+        appScope.launch {
+            combine(db.sessionDao().observeAll(), settingsRepo.flow) { sessions, settings -> sessions to settings }
+                .debounce(500)
+                .collect { (sessions, settings) -> WidgetUpdater.render(this@OvertimeApp, sessions, settings) }
+        }
     }
 
     fun trackerState(): TrackerState = synchronized(lock) { engine.state() }
@@ -48,7 +67,7 @@ class OvertimeApp : Application() {
      * в «серой зоне» между радиусами считаем, что человек на работе.
      */
     fun processLocation(lat: Double, lon: Double, accuracyM: Double, biasInside: Boolean): TrackerState {
-        synchronized(lock) {
+        val state = synchronized(lock) {
             val s = settingsRepo.current()
             val workLat = s.workLat
             val workLon = s.workLon
@@ -56,22 +75,25 @@ class OvertimeApp : Application() {
             val distance = Geo.distanceMeters(lat, lon, workLat, workLon)
             val wasAtWork = biasInside || engine.state().atWork
             val reading: Reading = Geo.classify(distance, accuracyM, wasAtWork, s)
-            return engine.onReading(LocalDateTime.now(), reading)
+            engine.onReading(LocalDateTime.now(), reading)
         }
+        // Таймер идущей сверхурочной на виджете обновляется с каждым замером.
+        WidgetUpdater.request(this)
+        return state
     }
 
-    private fun createChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Учёт сверхурочных",
-                NotificationManager.IMPORTANCE_LOW,
-            )
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
-        }
+    private fun createChannels() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Учёт сверхурочных", NotificationManager.IMPORTANCE_LOW),
+        )
+        nm.createNotificationChannel(
+            NotificationChannel(REMINDER_CHANNEL_ID, "Напоминания", NotificationManager.IMPORTANCE_DEFAULT),
+        )
     }
 
     companion object {
         const val CHANNEL_ID = "tracking"
+        const val REMINDER_CHANNEL_ID = "reminders"
     }
 }
