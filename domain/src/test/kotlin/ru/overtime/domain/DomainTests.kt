@@ -543,3 +543,48 @@ class MonthSummaryTest {
         assertEquals(575.0, r.totalGross)
     }
 }
+
+class LunchTest {
+    private fun auto(a: LocalDateTime, b: LocalDateTime) = Span(a, b, manual = false)
+
+    @Test
+    fun weekendDayMinusLunch() {
+        val sat = SAT
+        val spans = listOf(auto(sat.atTime(8, 0), sat.atTime(17, 0)))
+        assertEquals(480, Calculator.rawMinutes(sat, spans, Settings()))                       // 9 ч - 1 ч обеда
+        assertEquals(540, Calculator.rawMinutes(sat, spans, Settings(lunchEnabled = false)))
+    }
+
+    @Test
+    fun partialLunchOverlap() {
+        val sat = SAT
+        assertEquals(240, Calculator.rawMinutes(sat, listOf(auto(sat.atTime(8, 0), sat.atTime(12, 30))), Settings()))
+        assertEquals(180, Calculator.rawMinutes(sat, listOf(auto(sat.atTime(14, 0), sat.atTime(17, 0))), Settings()))
+    }
+
+    @Test
+    fun customLunchTime() {
+        val sat = SAT
+        val s = Settings(lunchStart = LocalTime.of(11, 30), lunchEnd = LocalTime.of(12, 0))
+        assertEquals(510, Calculator.rawMinutes(sat, listOf(auto(sat.atTime(8, 0), sat.atTime(17, 0))), s))
+    }
+
+    @Test
+    fun weekdayAfterShiftUnaffected() {
+        val spans = listOf(auto(at(MON, 8), at(MON, 19)))
+        assertEquals(120, Calculator.rawMinutes(MON, spans, Settings())) // 17:00-19:00, обед внутри смены
+    }
+
+    @Test
+    fun manualWeekendAlsoMinusLunch() {
+        val sat = SAT
+        assertEquals(480, Calculator.rawMinutes(sat, listOf(Span(sat.atTime(8, 0), sat.atTime(17, 0), true)), Settings()))
+    }
+
+    @Test
+    fun invalidLunchIsReported() {
+        val bad = Settings(lunchStart = LocalTime.of(13, 0), lunchEnd = LocalTime.of(12, 0))
+        assertTrue(bad.validationErrors().isNotEmpty())
+        assertTrue(bad.copy(lunchEnabled = false).validationErrors().isEmpty())
+    }
+}

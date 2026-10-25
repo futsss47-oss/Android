@@ -59,6 +59,23 @@ fun SettingsScreen(vm: AppViewModel) {
     val saved by vm.settings.collectAsStateWithLifecycle()
     var draft by remember { mutableStateOf(saved) }
     var message by remember { mutableStateOf<String?>(null) }
+    var showMap by remember { mutableStateOf(false) }
+
+    if (showMap) {
+        MapPickerDialog(
+            initialLat = draft.workLat,
+            initialLon = draft.workLon,
+            enterRadiusM = draft.enterRadiusM,
+            exitRadiusM = draft.exitRadiusM,
+            locate = { vm.currentLocation()?.let { it.latitude to it.longitude } },
+            onDismiss = { showMap = false },
+            onPick = { lat, lon ->
+                draft = draft.copy(workLat = lat, workLon = lon)
+                message = "Место работы выбрано на карте. Нажмите «Сохранить»."
+                showMap = false
+            },
+        )
+    }
 
     val formulaError = Formula.validate(draft.formula)
     val weekendFormulaError = Formula.validate(draft.weekendFormula)
@@ -94,6 +111,9 @@ fun SettingsScreen(vm: AppViewModel) {
             },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Назначить место работы здесь и сейчас") }
+        OutlinedButton(onClick = { showMap = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Выбрать на карте или ввести координаты")
+        }
         IntField("Радиус «я на работе»", draft.enterRadiusM, "м") { draft = draft.copy(enterRadiusM = it) }
         IntField("Радиус «я ушёл»", draft.exitRadiusM, "м") { draft = draft.copy(exitRadiusM = it) }
         IntField("Игнорировать замеры хуже", draft.maxAccuracyM, "м") { draft = draft.copy(maxAccuracyM = it) }
@@ -126,6 +146,29 @@ fun SettingsScreen(vm: AppViewModel) {
                 }
             }
         }
+
+        Section("Обед")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(
+                checked = draft.lunchEnabled,
+                onCheckedChange = { draft = draft.copy(lunchEnabled = it) },
+            )
+            Text("  Вычитать обед")
+            if (draft.lunchEnabled) {
+                TextButton(onClick = {
+                    pickTime(ctx, draft.lunchStart) { draft = draft.copy(lunchStart = it) }
+                }) { Text(draft.lunchStart.format(TIME_FMT)) }
+                Text("–")
+                TextButton(onClick = {
+                    pickTime(ctx, draft.lunchEnd) { draft = draft.copy(lunchEnd = it) }
+                }) { Text(draft.lunchEnd.format(TIME_FMT)) }
+            }
+        }
+        Text(
+            "Обед не оплачивается: в выходные и при сверхурочной вне смены вычитается та часть обеда, " +
+                "когда вы были на работе. Например, в выходной с 8:00 до 17:00 будет 8 часов.",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         Section("Что считать сверхурочной")
         RadioRow(draft.mode == OvertimeMode.AFTER_SHIFT, "Только после конца смены") {

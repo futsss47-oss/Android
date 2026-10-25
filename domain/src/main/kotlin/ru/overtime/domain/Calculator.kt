@@ -69,7 +69,14 @@ object Calculator {
                 for (w in windows) iv.intersect(w)?.let { parts += it }
             }
         }
-        return (union(parts).sumOf { it.seconds } / 60).toInt()
+        val merged = union(parts)
+        var seconds = merged.sumOf { it.seconds }
+        // Обед не оплачивается: вычитаем ту часть обеденного перерыва, когда человек был на работе.
+        if (s.lunchEnabled && s.lunchEnd.isAfter(s.lunchStart)) {
+            val lunch = Interval(date.atTime(s.lunchStart), date.atTime(s.lunchEnd))
+            seconds -= merged.sumOf { it.intersect(lunch)?.seconds ?: 0L }
+        }
+        return (seconds / 60).toInt()
     }
 
     /** Применяет минимальный порог и округление. */

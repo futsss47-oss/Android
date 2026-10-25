@@ -29,6 +29,10 @@ data class Settings(
     val mode: OvertimeMode = OvertimeMode.AFTER_SHIFT,
     /** В выходные весь день считается сверхурочным. */
     val weekendAllOvertime: Boolean = true,
+    /** Вычитать обед из выходных и из сверхурочной вне смены. */
+    val lunchEnabled: Boolean = true,
+    val lunchStart: LocalTime = LocalTime.of(12, 0),
+    val lunchEnd: LocalTime = LocalTime.of(13, 0),
     /** Первые N минут после конца смены не считаются. */
     val graceAfterShiftMinutes: Int = 0,
     val roundStepMinutes: Int = 10,
@@ -111,6 +115,7 @@ data class Settings(
             val r = rule(d)
             if (r.workday && !r.end.isAfter(r.start)) errors += "Конец смены должен быть позже начала (${d.name})"
         }
+        if (lunchEnabled && !lunchEnd.isAfter(lunchStart)) errors += "Конец обеда должен быть позже начала"
         if (roundStepMinutes < 1) errors += "Шаг округления должен быть не меньше 1 минуты"
         if (exitRadiusM < enterRadiusM) errors += "Радиус выхода не может быть меньше радиуса входа"
         if (enterRadiusM < 30) errors += "Радиус входа меньше 30 м ненадёжен"

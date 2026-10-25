@@ -17,7 +17,20 @@ android {
         versionName = "1.0"
     }
 
+    // Постоянный ключ для debug-сборок: каждая новая сборка с GitHub ставится поверх старой.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }
@@ -58,6 +71,7 @@ dependencies {
     ksp("androidx.room:room-compiler:$room")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
 }
