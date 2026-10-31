@@ -177,7 +177,7 @@ fun AbsenceCalendarCard(
 fun AdvanceCard(advance: AdvanceSummary, summary: MonthSummary) {
     SoftCard {
         Text("Аванс и остаток", style = MaterialTheme.typography.titleMedium)
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 Text("Аванс", style = MaterialTheme.typography.labelLarge)
                 Text(formatMoney(advance.net), style = MaterialTheme.typography.titleLarge)
@@ -186,7 +186,7 @@ fun AdvanceCard(advance: AdvanceSummary, summary: MonthSummary) {
             Column(Modifier.weight(1f)) {
                 Text("Остаток", style = MaterialTheme.typography.labelLarge)
                 Text(formatMoney(advance.rest), style = MaterialTheme.typography.titleLarge)
-                Hint("≈ 10–13 числа след. месяца")
+                Hint("≈ 10–13 след. мес.")
             }
         }
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
