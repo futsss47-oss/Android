@@ -661,3 +661,73 @@ class ReminderTimeTest {
         assertEquals(LocalDateTime.of(2027, 1, 31, 18, 0), ReminderTime.next(LocalDateTime.of(2026, 12, 31, 19, 0)))
     }
 }
+
+class AdvanceTest {
+    private fun dates(from: LocalDate, to: LocalDate): List<LocalDate> {
+        val list = mutableListOf<LocalDate>()
+        var d = from
+        while (!d.isAfter(to)) { list += d; d = d.plusDays(1) }
+        return list
+    }
+
+    private fun day(date: LocalDate, money: Double) = DayResult(
+        date = date, rawMinutes = 0, countedMinutes = 0, dayOff = false, money = money, gross = 0.0,
+        bonusBase = money, bonus = 0.0, withBonus = 0.0, net = 0.0,
+    )
+
+    private fun advanceOf(ym: YearMonth, absences: Map<LocalDate, Absence>, extraFirstHalf: Double): AdvanceSummary {
+        val s = Settings(salary = 32000.0, absences = absences)
+        val days = if (extraFirstHalf > 0) listOf(day(ym.atDay(5), extraFirstHalf)) else emptyList()
+        val report = Report(days, 0, extraFirstHalf, 0.0, null, totalBonusBase = extraFirstHalf)
+        val summary = Calculator.monthSummary(ym, report, s)
+        return Calculator.advance(ym, report, summary, s)
+    }
+
+    @Test
+    fun august2025SickLeave() {
+        // больничный 04.08–09.08.2025: в листке отработано 16 дней, аванс 9 147,29
+        val sick = dates(LocalDate.of(2025, 8, 4), LocalDate.of(2025, 8, 9)).associateWith { Absence.SICK }
+        val s = Settings(salary = 32000.0, absences = sick)
+        assertEquals(16, s.workedDaysFor(YearMonth.of(2025, 8)))
+        val a = advanceOf(YearMonth.of(2025, 8), sick, 0.0)
+        assertEquals(6, a.workedFirstHalf)
+        assertEquals(9147.29, a.net, 0.011)
+    }
+
+    @Test
+    fun august2026SickAndOvertime() {
+        // больничный 05.08–10.08.2026, отпуск 31.08; 3 ч сверхурочных в первой половине; аванс 10 100,53
+        val abs = dates(LocalDate.of(2026, 8, 5), LocalDate.of(2026, 8, 10)).associateWith { Absence.SICK } +
+            (LocalDate.of(2026, 8, 31) to Absence.VACATION)
+        val s = Settings(salary = 32000.0, absences = abs)
+        assertEquals(16, s.workedDaysFor(YearMonth.of(2026, 8)))
+        val a = advanceOf(YearMonth.of(2026, 8), abs, 952.38)
+        assertEquals(6, a.workedFirstHalf)
+        assertEquals(10100.53, a.net, 0.02)
+    }
+
+    @Test
+    fun september2026Vacation() {
+        // отпуск 01.09–11.09.2026: отработано 13 дней, аванс 4 002,00 (3 ч сверхурочных оплачены 1 090,91)
+        val vac = dates(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 11)).associateWith { Absence.VACATION }
+        val s = Settings(salary = 32000.0, absences = vac)
+        assertEquals(13, s.workedDaysFor(YearMonth.of(2026, 9)))
+        val a = advanceOf(YearMonth.of(2026, 9), vac, 1090.91)
+        assertEquals(2, a.workedFirstHalf)
+        assertEquals(4002.00, a.net, 0.011)
+    }
+
+    @Test
+    fun fullMonthJuly2026() {
+        val a = advanceOf(YearMonth.of(2026, 7), emptyMap(), 0.0)
+        assertEquals(11, a.firstHalfDays)
+        assertEquals(15311.0, a.net, 1.01) // в листке на рубль меньше из-за округления НДФЛ
+        assertTrue(a.rest > 0)
+    }
+
+    @Test
+    fun absenceOnHolidayIsIgnored() {
+        val s = Settings(salary = 32000.0, absences = mapOf(LocalDate.of(2026, 11, 4) to Absence.VACATION))
+        assertEquals(s.normDays(YearMonth.of(2026, 11)), s.workedDaysFor(YearMonth.of(2026, 11)))
+    }
+}

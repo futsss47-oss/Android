@@ -74,6 +74,24 @@ data class MonthSummary(
     val net: Double,
 )
 
+/**
+ * Аванс за первую половину месяца, как в расчётном листке:
+ * (оклад за отработанные 1–15 числа + выходные и сверхурочные за 1–15 число) × районный − НДФЛ.
+ * Премия в аванс не входит. Остаток = вся зарплата на руки − аванс.
+ */
+data class AdvanceSummary(
+    val firstHalfDays: Int,
+    val workedFirstHalf: Int,
+    val oklad: Double,
+    val extra: Double,
+    val district: Double,
+    val gross: Double,
+    val tax: Double,
+    val net: Double,
+    /** Остаток зарплаты, который придёт в следующем месяце. */
+    val rest: Double,
+)
+
 object Calculator {
 
     private fun round2(x: Double): Double = Math.round(x * 100.0) / 100.0
@@ -218,6 +236,33 @@ object Calculator {
             gross = gross,
             tax = tax,
             net = round2(gross - tax),
+        )
+    }
+
+    /** Последнее число первой половины месяца. */
+    const val ADVANCE_LAST_DAY = 15
+
+    fun advance(month: YearMonth, report: Report, summary: MonthSummary, s: Settings): AdvanceSummary {
+        val normDays = s.normDays(month)
+        val firstHalf = s.workdaysIn(month, 1, ADVANCE_LAST_DAY).size
+        val worked = (firstHalf - s.absentWorkdaysIn(month, 1, ADVANCE_LAST_DAY)).coerceAtLeast(0)
+        val oklad = if (normDays > 0) round2(s.salary * worked / normDays) else 0.0
+        val extra = round2(report.days.filter { it.date.dayOfMonth <= ADVANCE_LAST_DAY }.sumOf { it.money })
+        val base = oklad + extra
+        val district = round2(base * s.districtPercent / 100.0)
+        val gross = round2(base + district)
+        val tax = Math.round(gross * s.taxPercent / 100.0).toDouble()
+        val net = round2(gross - tax)
+        return AdvanceSummary(
+            firstHalfDays = firstHalf,
+            workedFirstHalf = worked,
+            oklad = oklad,
+            extra = extra,
+            district = district,
+            gross = gross,
+            tax = tax,
+            net = net,
+            rest = round2(summary.net - net),
         )
     }
 }

@@ -18,6 +18,13 @@ data class DayRule(
     val end: LocalTime = LocalTime.of(17, 0),
 )
 
+/** Причина отсутствия в рабочий день: оклад за этот день не начисляется. */
+enum class Absence(val title: String) {
+    VACATION("Отпуск"),
+    SICK("Больничный"),
+    DAY_OFF("Отгул"),
+}
+
 /**
  * Правка параметров одного месяца. null означает «взять автоматически / из общих настроек».
  * [bonus] — точная сумма премии из расчётного листка (тогда коэффициент не используется).
@@ -75,6 +82,8 @@ data class Settings(
     val monthReminder: Boolean = true,
     /** Правки нормы часов и премии по месяцам. Ключ вида «2026-10». */
     val monthOverrides: Map<String, MonthOverride> = emptyMap(),
+    /** Дни отсутствия: отпуск, больничный, отгул. */
+    val absences: Map<LocalDate, Absence> = emptyMap(),
 ) {
     fun rule(day: DayOfWeek): DayRule = days[day] ?: DayRule(false)
 
@@ -122,8 +131,20 @@ data class Settings(
     /** Рабочих дней в месяце по календарю РБ. */
     fun normDays(month: YearMonth): Int = ProductionCalendar.workDays(month)
 
-    /** Отработано дней: правка месяца или все рабочие дни. */
-    fun workedDaysFor(month: YearMonth): Int = override(month)?.workedDays ?: normDays(month)
+    /** Рабочий ли день по календарю РБ (без учёта отсутствий). */
+    fun isCalendarWorkday(date: LocalDate): Boolean = ProductionCalendar.hours(date) > 0
+
+    /** Рабочие дни месяца по календарю в диапазоне чисел [fromDay]..[toDay]. */
+    fun workdaysIn(month: YearMonth, fromDay: Int, toDay: Int): List<LocalDate> =
+        (fromDay..minOf(toDay, month.lengthOfMonth())).map { month.atDay(it) }.filter { isCalendarWorkday(it) }
+
+    /** Отмеченные отсутствия в рабочие дни диапазона. */
+    fun absentWorkdaysIn(month: YearMonth, fromDay: Int, toDay: Int): Int =
+        workdaysIn(month, fromDay, toDay).count { it in absences }
+
+    /** Отработано дней: правка месяца или рабочие дни минус отмеченные отсутствия. */
+    fun workedDaysFor(month: YearMonth): Int =
+        override(month)?.workedDays ?: (normDays(month) - absentWorkdaysIn(month, 1, 31))
 
     fun workedDaysIsAuto(month: YearMonth): Boolean = override(month)?.workedDays == null
 
