@@ -43,7 +43,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: Тесты логики и debug APK
-        run: ./gradlew :domain:test :app:assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          if ! ./gradlew :domain:test :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/build.log"; then
+            grep -E "^e: |error:|Exception|Caused by|FAILED|What went wrong|> " -A 2 "$RUNNER_TEMP/build.log" | head -60 | while IFS= read -r line; do
+              echo "::error title=Сборка::$line"
+            done
+            exit 1
+          fi
 
       - name: Release-ключ из секретов
         if: env.HAS_RELEASE_KEY == 'true'
