@@ -396,7 +396,7 @@ private fun CalendarLegend() {
     }
 }
 
-/** Итоги месяца 2×2: отпуск, больничный, отгул и свои правки календаря. */
+/** Итоги месяца: отпуск, больничный, отгул и свои правки календаря (если есть). */
 @Composable
 fun CalendarTotalsCard(month: YearMonth, settings: Settings) {
     val vacation = Leave.leaveDates(month, settings, Absence.VACATION).size
@@ -412,21 +412,20 @@ fun CalendarTotalsCard(month: YearMonth, settings: Settings) {
             Modifier.padding(horizontal = 18.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TotalItem({ BrushSwatch(CalendarBrush.VACATION) }, "Отпуск", "$vacation дн", Modifier.weight(1f))
-                TotalItem({ BrushSwatch(CalendarBrush.SICK) }, "Больничный", "$sick дн", Modifier.weight(1f))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TotalItem({ BrushSwatch(CalendarBrush.DAY_OFF) }, "Отгул", "$dayOff дн", Modifier.weight(1f))
+            // Списком в одну колонку: на узком экране подписи не обрезаются.
+            TotalItem({ BrushSwatch(CalendarBrush.VACATION) }, "Отпуск", "$vacation дн", Modifier.fillMaxWidth())
+            TotalItem({ BrushSwatch(CalendarBrush.SICK) }, "Больничный", "$sick дн", Modifier.fillMaxWidth())
+            TotalItem({ BrushSwatch(CalendarBrush.DAY_OFF) }, "Отгул", "$dayOff дн", Modifier.fillMaxWidth())
+            if (overrides > 0) {
                 TotalItem(
                     {
                         Box(Modifier.size(12.dp), contentAlignment = Alignment.Center) {
                             Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.outline, CircleShape))
                         }
                     },
-                    "Своих правок",
+                    "Свои правки календаря",
                     "$overrides",
-                    Modifier.weight(1f),
+                    Modifier.fillMaxWidth(),
                 )
             }
         }
