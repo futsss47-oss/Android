@@ -50,6 +50,56 @@
         </receiver>
 
         <receiver
+            android:name=".widget.ButtonWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_button_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.BarWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_bar_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.DetailWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_detail_info" />
+        </receiver>
+
+        <!-- Кнопка старт/стоп на виджетах: только явный Intent из своего PendingIntent. -->
+        <receiver
+            android:name=".widget.WidgetActionReceiver"
+            android:exported="false" />
+
+        <!-- Плитка «Сверхурочная» в шторке быстрых настроек. -->
+        <service
+            android:name=".tile.ManualTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_clock"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <receiver
             android:name=".reminder.MonthReminderReceiver"
             android:exported="false" />
 

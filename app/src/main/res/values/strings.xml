@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Сверхурочные</string>
-    <string name="widget_description">Сверхурочные сегодня, за месяц и сумма на руки</string>
+    <string name="widget_description">Месяц: на руки, сверхурочные, сегодня и кнопка старт/стоп</string>
+    <string name="widget_button_description">Кнопка: старт и стоп сверхурочной, таймер</string>
+    <string name="widget_bar_description">Полоса: таймер, на руки за месяц и кнопка старт/стоп</string>
+    <string name="widget_detail_description">Подробно: на руки, аванс и остаток, сверхурочные, сегодня</string>
+    <string name="widget_start">Начать сверхурочную</string>
+    <string name="widget_stop">Остановить сверхурочную</string>
+    <string name="tile_label">Сверхурочная</string>
 </resources>

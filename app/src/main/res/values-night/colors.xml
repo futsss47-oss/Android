@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="widget_bg">#FF1E1F24</color>
-    <color name="widget_text">#FFE6E6EA</color>
-    <color name="widget_text_secondary">#FFB0B3BA</color>
-    <color name="widget_accent">#FF9EC2FF</color>
+    <!-- Виджеты и плитка: фирменные цвета, тёмная тема. -->
+    <color name="widget_bg">#FF1A2420</color>
+    <color name="widget_text">#FFDDE4E1</color>
+    <color name="widget_text_secondary">#FFB0BDB8</color>
+    <color name="widget_accent">#FF7FD6B6</color>
+    <color name="widget_on_accent">#FF0B2A20</color>
+    <color name="widget_stop">#FFE0782B</color>
+    <color name="widget_on_stop">#FFFFFFFF</color>
 </resources>

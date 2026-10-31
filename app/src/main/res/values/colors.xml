@@ -1,8 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#1B4F9C</color>
-    <color name="widget_bg">#FFF4F6FB</color>
-    <color name="widget_text">#FF1B1B1F</color>
-    <color name="widget_text_secondary">#FF5F6368</color>
-    <color name="widget_accent">#FF1B4F9C</color>
+    <!-- Виджеты и плитка: фирменные цвета, светлая тема. -->
+    <color name="widget_bg">#FFFFFFFF</color>
+    <color name="widget_text">#FF12201C</color>
+    <color name="widget_text_secondary">#FF55655F</color>
+    <color name="widget_accent">#FF0F6E56</color>
+    <!-- Значок «старт» на зелёной кнопке. -->
+    <color name="widget_on_accent">#FFFFFFFF</color>
+    <!-- Кнопка «стоп» и значок на ней. -->
+    <color name="widget_stop">#FFE0782B</color>
+    <color name="widget_on_stop">#FFFFFFFF</color>
 </resources>

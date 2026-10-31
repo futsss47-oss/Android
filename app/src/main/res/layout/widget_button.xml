@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Виджет 1×1 «Кнопка»: круглая кнопка старт/стоп и короткая подпись под ней. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/w_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="4dp">
+
+    <ImageView
+        android:id="@+id/w_button"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:contentDescription="@string/widget_start"
+        android:scaleType="fitCenter"
+        android:src="@drawable/widget_button_start" />
+
+    <TextView
+        android:id="@+id/w_caption"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:gravity="center"
+        android:maxLines="1"
+        android:text="сегодня 0 мин"
+        android:textColor="@color/widget_text"
+        android:textSize="11sp" />
+</LinearLayout>
