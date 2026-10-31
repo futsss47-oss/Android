@@ -1,5 +1,6 @@
 package ru.overtime.app.widget
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
@@ -59,13 +60,18 @@ class DetailWidget : BaseOvertimeWidget()
 /** Нажатие на кнопку виджета: запускает или останавливает ручную сверхурочную. */
 class WidgetActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != ACTION_TOGGLE) return
+        val action = intent.action
+        if (action != ACTION_TOGGLE && action != ACTION_REFRESH) return
         val pending = goAsync()
         val app = context.applicationContext as OvertimeApp
         app.appScope.launch {
             try {
-                // Сам перерисует виджеты и плитку в шторке.
-                app.manualToggle()
+                if (action == ACTION_TOGGLE) {
+                    // Сам перерисует виджеты и плитку в шторке.
+                    app.manualToggle()
+                } else {
+                    WidgetUpdater.render(app, app.db.sessionDao().all(), app.settingsRepo.current())
+                }
             } finally {
                 pending.finish()
             }
@@ -74,6 +80,9 @@ class WidgetActionReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_TOGGLE = "ru.overtime.app.widget.TOGGLE_MANUAL"
+
+        /** Перерисовать виджеты: таймер идущей сверхурочной раз в минуту. */
+        const val ACTION_REFRESH = "ru.overtime.app.widget.REFRESH"
     }
 }
 
@@ -81,6 +90,8 @@ object WidgetUpdater {
 
     private const val REQUEST_OPEN = 0
     private const val REQUEST_TOGGLE = 1
+    private const val REQUEST_REFRESH = 2
+    private const val REFRESH_MS = 60_000L
 
     /** Пересчитать и перерисовать виджеты в фоне (данные берутся из базы). */
     fun request(context: Context) {
@@ -101,10 +112,30 @@ object WidgetUpdater {
         if (monthIds.isEmpty() && buttonIds.isEmpty() && barIds.isEmpty() && detailIds.isEmpty()) return
 
         val state = WidgetState.build(sessions, settings)
+        scheduleRefresh(context, state.runningStart != null)
         if (monthIds.isNotEmpty()) manager.updateAppWidget(monthIds, monthViews(context, state))
         if (buttonIds.isNotEmpty()) manager.updateAppWidget(buttonIds, buttonViews(context, state))
         if (barIds.isNotEmpty()) manager.updateAppWidget(barIds, barViews(context, state))
         if (detailIds.isNotEmpty()) manager.updateAppWidget(detailIds, detailViews(context, state))
+    }
+
+    /**
+     * Пока идёт сверхурочная, таймер на виджетах обновляется раз в минуту.
+     * Будильник не будит телефон (RTC без WAKEUP): при выключенном экране обновлений нет, и батарея не тратится.
+     */
+    private fun scheduleRefresh(context: Context, running: Boolean) {
+        val alarms = context.getSystemService(AlarmManager::class.java) ?: return
+        val pi = PendingIntent.getBroadcast(
+            context,
+            REQUEST_REFRESH,
+            Intent(context, WidgetActionReceiver::class.java).setAction(WidgetActionReceiver.ACTION_REFRESH),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        if (running) {
+            alarms.set(AlarmManager.RTC, System.currentTimeMillis() + REFRESH_MS, pi)
+        } else {
+            alarms.cancel(pi)
+        }
     }
 
     // ---- вёрстка отдельных виджетов ----
