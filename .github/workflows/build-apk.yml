@@ -76,7 +76,14 @@ jobs:
       - name: Скриншоты экранов
         id: shots
         continue-on-error: true
-        run: ./gradlew :app:recordPaparazziDebug --stacktrace
+        run: |
+          set -o pipefail
+          if ! ./gradlew :app:recordPaparazziDebug 2>&1 | tee "$RUNNER_TEMP/shots.log"; then
+            grep -E "^e: |error:|Exception|Caused by|FAILED|What went wrong" -A 3 "$RUNNER_TEMP/shots.log" | head -60 | while IFS= read -r line; do
+              echo "::error title=Скриншоты::$line"
+            done
+            exit 1
+          fi
 
       - name: Выложить скриншоты в ветку ui-snapshots
         if: steps.shots.outcome == 'success'
