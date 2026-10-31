@@ -71,7 +71,7 @@ object SettingsJson {
         o.put("formula", s.formula)
         o.put("weekendFormula", s.weekendFormula)
         o.put("salary", s.salary)
-        o.put("bonus", s.bonus)
+        o.put("bonusPct", s.bonusPercent)
         o.put("district", s.districtPercent)
         o.put("tax", s.taxPercent)
         val months = JSONObject()
@@ -80,6 +80,8 @@ object SettingsJson {
             val mj = JSONObject()
             m.norm?.let { mj.put("norm", it) }
             m.bonus?.let { mj.put("bonus", it) }
+            m.bonusPercent?.let { mj.put("bonusPct", it) }
+            m.workedDays?.let { mj.put("days", it) }
             months.put(key, mj)
         }
         o.put("months", months)
@@ -120,7 +122,7 @@ object SettingsJson {
             formula = o.optString("formula", d.formula),
             weekendFormula = o.optString("weekendFormula", d.weekendFormula),
             salary = o.optDouble("salary", d.salary),
-            bonus = o.optDouble("bonus", d.bonus),
+            bonusPercent = o.optDouble("bonusPct", d.bonusPercent),
             districtPercent = o.optDouble("district", d.districtPercent),
             taxPercent = o.optDouble("tax", d.taxPercent),
             monthOverrides = decodeMonths(o.optJSONObject("months")),
@@ -138,6 +140,8 @@ object SettingsJson {
             val m = MonthOverride(
                 norm = if (mj.has("norm")) mj.getDouble("norm") else null,
                 bonus = if (mj.has("bonus")) mj.getDouble("bonus") else null,
+                bonusPercent = if (mj.has("bonusPct")) mj.getDouble("bonusPct") else null,
+                workedDays = if (mj.has("days")) mj.getInt("days") else null,
             )
             if (!m.isEmpty) result[key] = m
         }

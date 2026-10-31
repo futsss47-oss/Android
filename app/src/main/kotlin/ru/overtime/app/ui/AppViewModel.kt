@@ -86,11 +86,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         MonthReminder.schedule(app, s)
     }
 
-    /** Правка нормы часов и премии для одного месяца. null = автоматически / из общих настроек. */
-    fun saveMonthOverride(month: YearMonth, norm: Double?, bonus: Double?) {
+    /** Правка дней, нормы и премии одного месяца. Пустые поля = автоматически / из общих настроек. */
+    fun saveMonthOverride(month: YearMonth, o: MonthOverride) {
         val s = app.settingsRepo.current()
         val map = s.monthOverrides.toMutableMap()
-        val o = MonthOverride(norm = norm, bonus = bonus)
         if (o.isEmpty) map.remove(month.toString()) else map[month.toString()] = o
         app.settingsRepo.save(s.copy(monthOverrides = map))
     }

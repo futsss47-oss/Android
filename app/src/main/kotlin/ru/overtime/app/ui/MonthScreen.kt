@@ -164,7 +164,8 @@ fun MonthScreen(vm: AppViewModel) {
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(formatMinutes(day.countedMinutes), style = MaterialTheme.typography.titleSmall)
-                            Hint(formatMoney(day.gross))
+                            Text("≈ " + formatMoney(day.net), style = MaterialTheme.typography.bodyMedium)
+                            Hint("начисл. ${formatMoney(day.withBonus)}")
                         }
                     }
                 }
@@ -210,10 +211,10 @@ fun MonthScreen(vm: AppViewModel) {
         MonthParamsDialog(
             summary = summary,
             autoNorm = ru.overtime.domain.ProductionCalendar.normHours(month).toDouble(),
-            defaultBonus = settings.bonus,
+            defaultBonusPercent = settings.bonusPercent,
             onDismiss = { editingMonth = false },
-            onSave = { norm, bonus ->
-                vm.saveMonthOverride(month, norm, bonus)
+            onSave = { o ->
+                vm.saveMonthOverride(month, o)
                 editingMonth = false
             },
         )
@@ -342,18 +343,24 @@ private fun shareCsv(
 ) {
     fun n(v: Double) = String.format(RU, "%.2f", v)
     val csv = buildString {
-        appendLine("Дата;Минут;Часов;Выходной;По формуле, руб;С районным, руб")
+        appendLine("Дата;Минут;Часов;Выходной;По формуле, руб;Премия, руб;Начислено, руб;На руки, руб")
         for (d in report.days) {
             appendLine(
                 "${d.date};${d.countedMinutes};${n(d.countedMinutes / 60.0)};" +
-                    (if (d.dayOff) "да" else "нет") + ";${n(d.money)};${n(d.gross)}",
+                    (if (d.dayOff) "да" else "нет") + ";${n(d.money)};${n(d.bonus)};${n(d.withBonus)};${n(d.net)}",
             )
         }
-        appendLine("Итого;${report.totalMinutes};${n(report.totalMinutes / 60.0)};;${n(report.totalMoney)};${n(report.totalGross)}")
+        appendLine(
+            "Итого;${report.totalMinutes};${n(report.totalMinutes / 60.0)};;${n(report.totalMoney)};" +
+                "${n(report.days.sumOf { it.bonus })};${n(report.totalWithBonus)};${n(report.totalNet)}",
+        )
         appendLine()
         appendLine("Норма часов;${n(summary.norm)}")
         appendLine("Ставка в час;${n(summary.rate)}")
-        appendLine("Оклад;${n(summary.salary)}")
+        appendLine("Отработано дней;${summary.workedDays} из ${summary.normDays}")
+        appendLine("Оклад за отработанное;${n(summary.oklad)}")
+        appendLine("Коэффициент премии, %;${n(summary.bonusPercent)}")
+        appendLine("База премии;${n(summary.bonusBase)}")
         appendLine("Премия;${n(summary.bonus)}")
         appendLine("Выходные и сверхурочные;${n(summary.extra)}")
         appendLine("Районный коэффициент;${n(summary.district)}")

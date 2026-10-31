@@ -67,10 +67,10 @@ object WidgetUpdater {
         } else {
             views.setTextViewText(R.id.w_status, "Сегодня: " + formatMinutes(today?.countedMinutes ?: 0))
         }
-        views.setTextViewText(R.id.w_today_money, today?.let { "+" + formatRub(it.gross) + " сегодня" } ?: "")
+        views.setTextViewText(R.id.w_today_money, today?.let { "≈ +" + formatRub(it.net) + " на руки" } ?: "")
         views.setTextViewText(
             R.id.w_month,
-            "Месяц: ${formatMinutes(report.totalMinutes)} · +${formatRub(report.totalGross)}",
+            "Месяц: ${formatMinutes(report.totalMinutes)} · +${formatRub(report.totalNet)}",
         )
         views.setTextViewText(R.id.w_net, "На руки ≈ " + formatRub(summary.net))
 

@@ -15,33 +15,57 @@ data class DayResult(
     val rawMinutes: Int,
     val countedMinutes: Int,
     val dayOff: Boolean,
-    /** Оплата за день по формуле, до районного коэффициента. */
+    /** Оплата за день по формуле, до премии и районного коэффициента. */
     val money: Double,
-    /** Оплата за день с районным коэффициентом (как «начислено»). */
+    /** Оплата с районным коэффициентом, без премии. */
     val gross: Double,
+    /** Часть оплаты, на которую начисляется премия (выходные — половина, сверхурочные — целиком). */
+    val bonusBase: Double,
+    /** Премия, которую добавил этот день. */
+    val bonus: Double,
+    /** Начислено за день: оплата + премия, с районным коэффициентом. */
+    val withBonus: Double,
+    /** На руки за день: начислено с премией минус НДФЛ. */
+    val net: Double,
 )
 
 data class Report(
     val days: List<DayResult>,
     val totalMinutes: Int,
-    /** Сумма по формулам за период, до районного коэффициента. */
+    /** Сумма по формулам за период, до премии и районного коэффициента. */
     val totalMoney: Double,
-    /** Сумма за период с районным коэффициентом. */
+    /** Сумма за период с районным коэффициентом, без премии. */
     val totalGross: Double,
     /** Если формула некорректна, здесь текст ошибки, а деньги по этим дням равны нулю. */
     val formulaError: String?,
+    /** База премии от переработок (выходные одинарно + сверхурочные). */
+    val totalBonusBase: Double = 0.0,
+    /** Начислено за переработки с премией и районным коэффициентом. */
+    val totalWithBonus: Double = 0.0,
+    /** На руки за переработки с премией. */
+    val totalNet: Double = 0.0,
 )
 
-/** Расчёт месяца в виде расчётного листка. Оклад и премия плановые, остальное по записям. */
+/** Расчёт месяца в виде расчётного листка. */
 data class MonthSummary(
     val month: YearMonth,
     val norm: Double,
     val normIsAuto: Boolean,
     val rate: Double,
     val salary: Double,
+    val normDays: Int,
+    val workedDays: Int,
+    val workedDaysIsAuto: Boolean,
+    /** Оклад за отработанные дни. */
+    val oklad: Double,
+    val bonusPercent: Double,
+    val bonusPercentIsAuto: Boolean,
+    /** База премии: оклад за отработанное + выходные одинарно + сверхурочные. */
+    val bonusBase: Double,
     val bonus: Double,
-    val bonusIsAuto: Boolean,
-    /** Выходные и сверхурочные до районного коэффициента. */
+    /** Премия вписана вручную точной суммой из листка. */
+    val bonusIsManual: Boolean,
+    /** Выходные и сверхурочные до премии и районного коэффициента. */
     val extra: Double,
     val base: Double,
     val district: Double,
@@ -125,7 +149,22 @@ object Calculator {
                     formulaError = e.message
                     0.0
                 }
-                days += DayResult(date, raw, counted, !s.ruleFor(date).workday, money, round2(money * k))
+                val dayOff = !s.ruleFor(date).workday
+                val bonusBase = if (dayOff) money * Settings.WEEKEND_BONUS_SHARE else money
+                val bonus = bonusBase * s.bonusPercentFor(YearMonth.from(date)) / 100.0
+                val withBonus = (money + bonus) * k
+                days += DayResult(
+                    date = date,
+                    rawMinutes = raw,
+                    countedMinutes = counted,
+                    dayOff = dayOff,
+                    money = money,
+                    gross = round2(money * k),
+                    bonusBase = round2(bonusBase),
+                    bonus = round2(bonus),
+                    withBonus = round2(withBonus),
+                    net = round2(withBonus * (1.0 - s.taxPercent / 100.0)),
+                )
             }
             date = date.plusDays(1)
         }
@@ -135,17 +174,26 @@ object Calculator {
             totalMoney = round2(days.sumOf { it.money }),
             totalGross = round2(days.sumOf { it.gross }),
             formulaError = formulaError,
+            totalBonusBase = round2(days.sumOf { it.bonusBase }),
+            totalWithBonus = round2(days.sumOf { it.withBonus }),
+            totalNet = round2(days.sumOf { it.net }),
         )
     }
 
     /**
-     * Расчёт месяца как в расчётном листке: оклад + премия + выходные и сверхурочные,
+     * Расчёт месяца как в расчётном листке:
+     * оклад за отработанные дни + выходные и сверхурочные + премия
+     * (коэффициент × (оклад за отработанное + выходные одинарно + сверхурочные)),
      * на сумму районный коэффициент, из начисленного НДФЛ (округляется до рубля).
      * [report] должен быть отчётом за этот же месяц.
      */
     fun monthSummary(month: YearMonth, report: Report, s: Settings): MonthSummary {
-        val bonus = s.bonusFor(month)
-        val base = round2(s.salary + bonus + report.totalMoney)
+        val oklad = round2(s.okladFor(month))
+        val percent = s.bonusPercentFor(month)
+        val bonusBase = round2(oklad + report.totalBonusBase)
+        val manual = s.bonusSumOverride(month)
+        val bonus = manual ?: round2(bonusBase * percent / 100.0)
+        val base = round2(oklad + report.totalMoney + bonus)
         val district = round2(base * s.districtPercent / 100.0)
         val gross = round2(base + district)
         val tax = Math.round(gross * s.taxPercent / 100.0).toDouble()
@@ -155,8 +203,15 @@ object Calculator {
             normIsAuto = s.normIsAuto(month),
             rate = round2(s.hourlyRate(month)),
             salary = s.salary,
+            normDays = s.normDays(month),
+            workedDays = s.workedDaysFor(month),
+            workedDaysIsAuto = s.workedDaysIsAuto(month),
+            oklad = oklad,
+            bonusPercent = percent,
+            bonusPercentIsAuto = s.bonusPercentIsAuto(month),
+            bonusBase = bonusBase,
             bonus = bonus,
-            bonusIsAuto = s.bonusIsAuto(month),
+            bonusIsManual = manual != null,
             extra = report.totalMoney,
             base = base,
             district = district,

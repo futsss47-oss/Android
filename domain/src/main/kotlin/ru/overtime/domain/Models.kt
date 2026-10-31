@@ -18,9 +18,17 @@ data class DayRule(
     val end: LocalTime = LocalTime.of(17, 0),
 )
 
-/** Правка параметров одного месяца. null означает «взять автоматически / из общих настроек». */
-data class MonthOverride(val norm: Double? = null, val bonus: Double? = null) {
-    val isEmpty: Boolean get() = norm == null && bonus == null
+/**
+ * Правка параметров одного месяца. null означает «взять автоматически / из общих настроек».
+ * [bonus] — точная сумма премии из расчётного листка (тогда коэффициент не используется).
+ */
+data class MonthOverride(
+    val norm: Double? = null,
+    val bonus: Double? = null,
+    val bonusPercent: Double? = null,
+    val workedDays: Int? = null,
+) {
+    val isEmpty: Boolean get() = norm == null && bonus == null && bonusPercent == null && workedDays == null
 }
 
 /** Все настройки приложения. Деньги везде в рублях. */
@@ -54,8 +62,11 @@ data class Settings(
     val weekendFormula: String = DEFAULT_WEEKEND_FORMULA,
     /** Оклад, руб/мес. Часовая ставка = оклад / норма часов месяца, считается сама. */
     val salary: Double = 0.0,
-    /** Месячная премия без сверхурочных, руб. Для конкретного месяца её можно поправить. */
-    val bonus: Double = 0.0,
+    /**
+     * Коэффициент премии, %. Премия = коэффициент × (оклад за отработанные дни + оплата выходных
+     * в одинарном размере + сверхурочные). Выведен из расчётных листков: 158,78%.
+     */
+    val bonusPercent: Double = DEFAULT_BONUS_PERCENT,
     /** Районный коэффициент, %. Начисляется на оклад, премию, выходные и сверхурочные. */
     val districtPercent: Double = 15.0,
     /** НДФЛ, %. */
@@ -98,9 +109,29 @@ data class Settings(
 
     fun normIsAuto(month: YearMonth): Boolean = monthOverrides[month.toString()]?.norm == null
 
-    fun bonusFor(month: YearMonth): Double = monthOverrides[month.toString()]?.bonus ?: bonus
+    private fun override(month: YearMonth): MonthOverride? = monthOverrides[month.toString()]
 
-    fun bonusIsAuto(month: YearMonth): Boolean = monthOverrides[month.toString()]?.bonus == null
+    /** Коэффициент премии месяца, %: правка месяца или общий. */
+    fun bonusPercentFor(month: YearMonth): Double = override(month)?.bonusPercent ?: bonusPercent
+
+    fun bonusPercentIsAuto(month: YearMonth): Boolean = override(month)?.bonusPercent == null
+
+    /** Точная сумма премии из листка, если вписана. */
+    fun bonusSumOverride(month: YearMonth): Double? = override(month)?.bonus
+
+    /** Рабочих дней в месяце по календарю РБ. */
+    fun normDays(month: YearMonth): Int = ProductionCalendar.workDays(month)
+
+    /** Отработано дней: правка месяца или все рабочие дни. */
+    fun workedDaysFor(month: YearMonth): Int = override(month)?.workedDays ?: normDays(month)
+
+    fun workedDaysIsAuto(month: YearMonth): Boolean = override(month)?.workedDays == null
+
+    /** Оклад за отработанные дни: оклад / рабочих дней × отработано. */
+    fun okladFor(month: YearMonth): Double {
+        val days = normDays(month)
+        return if (days > 0) salary * workedDaysFor(month).coerceAtMost(days) / days else 0.0
+    }
 
     /** Часовая ставка месяца = оклад / норма часов. */
     fun hourlyRate(month: YearMonth): Double {
@@ -125,11 +156,14 @@ data class Settings(
         if (graceAfterShiftMinutes < 0 || minOvertimeMinutes < 0 || mergeGapMinutes < 0) {
             errors += "Значения в минутах не могут быть отрицательными"
         }
-        if (salary < 0 || bonus < 0) errors += "Оклад и премия не могут быть отрицательными"
+        if (salary < 0) errors += "Оклад не может быть отрицательным"
+        if (bonusPercent < 0 || bonusPercent > 1000) errors += "Коэффициент премии должен быть от 0 до 1000%"
         if (districtPercent < 0 || districtPercent > 100) errors += "Районный коэффициент должен быть от 0 до 100%"
         if (taxPercent < 0 || taxPercent > 100) errors += "НДФЛ должен быть от 0 до 100%"
         for ((key, o) in monthOverrides) {
-            if ((o.norm ?: 0.0) < 0 || (o.bonus ?: 0.0) < 0) errors += "Отрицательное значение в правке месяца $key"
+            if ((o.norm ?: 0.0) < 0 || (o.bonus ?: 0.0) < 0 || (o.bonusPercent ?: 0.0) < 0 || (o.workedDays ?: 0) < 0) {
+                errors += "Отрицательное значение в правке месяца $key"
+            }
         }
         return errors
     }
@@ -140,6 +174,15 @@ data class Settings(
 
         /** Выходные: всё время в двойном размере. */
         const val DEFAULT_WEEKEND_FORMULA = "rate * h * 2"
+
+        /** Коэффициент премии по расчётным листкам: 50 810 / 32 000 = 158,78125%. */
+        const val DEFAULT_BONUS_PERCENT = 158.78125
+
+        /**
+         * Какая часть оплаты выходных входит в базу премии. В листке выходные — «оплата» и «доплата»
+         * по одинарной ставке, премия начисляется только на «оплату», то есть на половину от ×2.
+         */
+        const val WEEKEND_BONUS_SHARE = 0.5
 
         fun defaultDays(): Map<DayOfWeek, DayRule> = DayOfWeek.values().associateWith {
             DayRule(workday = it != DayOfWeek.SATURDAY && it != DayOfWeek.SUNDAY)

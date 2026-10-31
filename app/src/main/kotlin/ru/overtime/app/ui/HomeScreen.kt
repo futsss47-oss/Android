@@ -113,13 +113,13 @@ fun HomeScreen(vm: AppViewModel) {
             StatTile(
                 title = "Сегодня",
                 value = today?.let { formatMinutes(it.countedMinutes) } ?: "0 мин",
-                sub = today?.let { "+" + formatMoney(it.gross) } ?: "сверхурочной нет",
+                sub = today?.let { "≈ +" + formatMoney(it.net) + " на руки" } ?: "сверхурочной нет",
                 modifier = Modifier.weight(1f),
             )
             StatTile(
                 title = "За месяц",
                 value = formatMinutes(report.totalMinutes),
-                sub = "+" + formatMoney(report.totalGross),
+                sub = "≈ +" + formatMoney(report.totalNet) + " на руки",
                 modifier = Modifier.weight(1f),
             )
         }

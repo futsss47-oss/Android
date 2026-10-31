@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -22,12 +24,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.MonthSummary
 import ru.overtime.domain.ProductionCalendar
 import ru.overtime.domain.Report
 
-fun formatPercent(v: Double): String =
-    if (v == Math.floor(v)) "${v.toLong()}%" else String.format(RU, "%.1f%%", v)
+fun formatPercent(v: Double): String = when {
+    v == Math.floor(v) -> "${v.toLong()}%"
+    else -> String.format(RU, "%.2f%%", v).replace(",00%", "%")
+}
 
 /** Расчёт месяца в виде расчётного листка. */
 @Composable
@@ -46,13 +51,30 @@ fun MonthSummaryCard(
                 formatHours(summary.norm) + if (summary.normIsAuto) " (календарь РБ)" else " (вручную)",
             )
             SummaryLine("Ставка в час", formatMoney(summary.rate))
+            SummaryLine(
+                "Отработано дней",
+                "${summary.workedDays} из ${summary.normDays}" + if (summary.workedDaysIsAuto) "" else " (вручную)",
+            )
             HorizontalDivider()
-            SummaryLine("Оклад", formatMoney(summary.salary))
-            SummaryLine(if (summary.bonusIsAuto) "Премия" else "Премия (вручную)", formatMoney(summary.bonus))
+            SummaryLine(
+                if (summary.workedDays < summary.normDays) "Оклад за отработанные дни" else "Оклад",
+                formatMoney(summary.oklad),
+            )
             SummaryLine(
                 "Выходные и сверхурочные, ${formatMinutes(report.totalMinutes)}",
                 formatMoney(summary.extra),
             )
+            SummaryLine(
+                if (summary.bonusIsManual) {
+                    "Премия (из листка)"
+                } else {
+                    "Премия ${formatPercent(summary.bonusPercent)}" + if (summary.bonusPercentIsAuto) "" else " (вручную)"
+                },
+                formatMoney(summary.bonus),
+            )
+            if (!summary.bonusIsManual) {
+                Hint("от ${formatMoney(summary.bonusBase)}: оклад за отработанное + выходные одинарно + сверхурочные")
+            }
             SummaryLine("Районный коэффициент ${formatPercent(districtPercent)}", formatMoney(summary.district))
             SummaryLine("Начислено", formatMoney(summary.gross), bold = true)
             SummaryLine("НДФЛ ${formatPercent(taxPercent)}", "−" + formatMoney(summary.tax))
@@ -63,11 +85,8 @@ fun MonthSummaryCard(
             ProductionCalendar.note(summary.month.year)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
-            Text(
-                "Оклад и премия плановые: больничные, отпуска и разовые начисления приложение не учитывает.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            FilledTonalButton(onClick = onEdit) { Text("Изменить норму или премию месяца") }
+            Hint("Больничные, отпускные и разовые начисления не учитываются.")
+            FilledTonalButton(onClick = onEdit) { Text("Дни, норма и премия месяца") }
         }
     }
 }
@@ -87,63 +106,86 @@ private fun parseNumber(text: String): Double? =
 private fun plainNumber(v: Double): String =
     if (v == Math.floor(v)) v.toLong().toString() else v.toString()
 
-/** Правка нормы часов и премии одного месяца. Пустое поле = автоматически. */
+@Composable
+private fun NumberField(
+    value: String,
+    onChange: (String) -> Unit,
+    label: String,
+    placeholder: String,
+    suffix: String,
+    isError: Boolean,
+    decimal: Boolean = true,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        placeholder = { Text(placeholder) },
+        suffix = { Text(suffix) },
+        isError = isError,
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/** Правка отработанных дней, нормы и премии одного месяца. Пустое поле = автоматически. */
 @Composable
 fun MonthParamsDialog(
     summary: MonthSummary,
     autoNorm: Double,
-    defaultBonus: Double,
+    defaultBonusPercent: Double,
     onDismiss: () -> Unit,
-    onSave: (norm: Double?, bonus: Double?) -> Unit,
+    onSave: (MonthOverride) -> Unit,
 ) {
+    var daysText by remember { mutableStateOf(if (summary.workedDaysIsAuto) "" else summary.workedDays.toString()) }
     var normText by remember { mutableStateOf(if (summary.normIsAuto) "" else plainNumber(summary.norm)) }
-    var bonusText by remember { mutableStateOf(if (summary.bonusIsAuto) "" else plainNumber(summary.bonus)) }
+    var percentText by remember {
+        mutableStateOf(if (summary.bonusPercentIsAuto) "" else plainNumber(summary.bonusPercent))
+    }
+    var bonusText by remember { mutableStateOf(if (summary.bonusIsManual) plainNumber(summary.bonus) else "") }
 
+    val days = if (daysText.isBlank()) null else daysText.trim().toIntOrNull()
     val norm = if (normText.isBlank()) null else parseNumber(normText)
+    val percent = if (percentText.isBlank()) null else parseNumber(percentText)
     val bonus = if (bonusText.isBlank()) null else parseNumber(bonusText)
+    val daysBad = daysText.isNotBlank() && (days == null || days < 0 || days > summary.normDays)
     val normBad = normText.isNotBlank() && (norm == null || norm <= 0.0)
+    val percentBad = percentText.isNotBlank() && (percent == null || percent < 0.0)
     val bonusBad = bonusText.isNotBlank() && (bonus == null || bonus < 0.0)
+    val ok = !daysBad && !normBad && !percentBad && !bonusBad
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(summary.month.format(MONTH_FMT).replaceFirstChar { it.uppercase() }) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = normText,
-                    onValueChange = { normText = it },
-                    label = { Text("Норма часов") },
-                    placeholder = { Text("авто: ${formatHours(autoNorm)}") },
-                    suffix = { Text("ч") },
-                    isError = normBad,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                NumberField(
+                    daysText, { daysText = it }, "Отработано дней", "все: ${summary.normDays}", "дн.", daysBad,
+                    decimal = false,
                 )
-                OutlinedTextField(
-                    value = bonusText,
-                    onValueChange = { bonusText = it },
-                    label = { Text("Премия") },
-                    placeholder = { Text("из настроек: ${formatMoney(defaultBonus)}") },
-                    suffix = { Text("₽") },
-                    isError = bonusBad,
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                    modifier = Modifier.fillMaxWidth(),
+                Hint("Если были больничный, отпуск или отгул. Оклад и премия уменьшатся пропорционально.")
+                NumberField(normText, { normText = it }, "Норма часов", "авто: ${formatHours(autoNorm)}", "ч", normBad)
+                NumberField(
+                    percentText, { percentText = it }, "Коэффициент премии", "общий: ${formatPercent(defaultBonusPercent)}",
+                    "%", percentBad,
                 )
-                Text(
-                    "Пустое поле: норма берётся из календаря РБ, премия из настроек. " +
-                        "Норму можно сверить с расчётным листком (колонка «Часы» у оплаты по окладу).",
-                    style = MaterialTheme.typography.bodySmall,
+                NumberField(bonusText, { bonusText = it }, "Премия точной суммой", "из листка", "₽", bonusBad)
+                Hint(
+                    "Пустое поле: дни и норма из календаря РБ, премия по коэффициенту. " +
+                        "Если вписать сумму премии из расчётного листка, коэффициент не используется.",
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onSave(norm, bonus) }, enabled = !normBad && !bonusBad) { Text("Сохранить") }
+            TextButton(
+                onClick = { onSave(MonthOverride(norm = norm, bonus = bonus, bonusPercent = percent, workedDays = days)) },
+                enabled = ok,
+            ) { Text("Сохранить") }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = { onSave(null, null) }) { Text("Сбросить") }
+                TextButton(onClick = { onSave(MonthOverride()) }) { Text("Сбросить") }
                 TextButton(onClick = onDismiss) { Text("Отмена") }
             }
         },

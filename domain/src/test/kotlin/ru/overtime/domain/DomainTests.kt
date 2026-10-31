@@ -499,48 +499,109 @@ class CalendarTest {
 }
 
 class MonthSummaryTest {
-    @Test
-    fun september2025LikePayslip() {
-        // ставка 181.82 (176 ч), 21 ч сверхурочных (14 ч x1.5 + 7 ч x2) и 22 ч выходных, как в листке за сентябрь 2025
-        val s = Settings(salary = 32000.0, bonus = 67266.0)
-        val ym = YearMonth.of(2025, 9)
-        val rate = s.hourlyRate(ym)
-        assertEquals(176.0, s.normFor(ym))
-        assertEquals(6363.64, Calculator.money(LocalDate.of(2025, 9, 1), 0, s) + Math.round(rate * 35 * 100) / 100.0, 0.001)
-        assertEquals(8000.0, Math.round(rate * 22 * 2 * 100) / 100.0)
-        // в листке сверхурочные отрезаны до копейки (6363.63), берём суммы ровно как в листке
-        val report = Report(emptyList(), 0, 6363.63 + 8000.0, 0.0, null)
+    /**
+     * Проверка по расчётным листкам: [weekendTotal] — «оплата» + «доплата» за выходные,
+     * [overtime] — оплата сверхурочных, [worked] — отработано дней.
+     */
+    private fun payslip(
+        ym: YearMonth,
+        worked: Int,
+        weekendTotal: Double,
+        overtime: Double,
+        expectedOklad: Double,
+        expectedBonus: Double,
+        expectedDistrict: Double,
+    ) {
+        val s = Settings(salary = 32000.0).copy(
+            monthOverrides = mapOf(ym.toString() to MonthOverride(workedDays = worked)),
+        )
+        val report = Report(
+            days = emptyList(),
+            totalMinutes = 0,
+            totalMoney = weekendTotal + overtime,
+            totalGross = 0.0,
+            formulaError = null,
+            totalBonusBase = weekendTotal / 2 + overtime,
+        )
         val sum = Calculator.monthSummary(ym, report, s)
-        assertEquals(113629.63, sum.base, 0.011)
-        assertEquals(17044.44, sum.district, 0.011)
-        assertEquals(130674.07, sum.gross, 0.011)
-        assertEquals(16988.0, sum.tax)
-        assertEquals(113686.07, sum.net, 0.011)
+        assertEquals(expectedOklad, sum.oklad, 0.011, "оклад $ym")
+        assertEquals(expectedBonus, sum.bonus, 1.5, "премия $ym")
+        assertEquals(expectedDistrict, sum.district, 0.3, "районный $ym")
+    }
+
+    @Test
+    fun allPayslipsMatch() {
+        payslip(YearMonth.of(2025, 3), 20, 2 * 4729.56, 0.0, 32000.00, 58321.0, 17667.02 - 18000 * 0.15)
+        payslip(YearMonth.of(2025, 6), 18, 0.0, 0.0, 32000.00, 50810.0, 12421.50)
+        payslip(YearMonth.of(2025, 7), 23, 2 * 1391.30, 8521.74, 32000.00, 66550.0, 16478.15)
+        payslip(YearMonth.of(2025, 8), 16, 2 * 1523.81, 952.38, 24380.95, 42644.0, 10653.74)
+        payslip(YearMonth.of(2025, 9), 22, 2 * 4000.00, 6363.63, 32000.00, 67266.0, 17044.44)
+        payslip(YearMonth.of(2025, 10), 13, 2 * 2925.71, 2742.86, 18909.09, 39025.0, 9979.26)
+        payslip(YearMonth.of(2026, 6), 17, 2 * 1628.74, 2874.26, 25904.76, 48282.0, 12047.78)
+        payslip(YearMonth.of(2026, 7), 23, 0.0, 0.0, 32000.00, 50810.0, 12421.50)
+        payslip(YearMonth.of(2026, 8), 16, 0.0, 952.38, 24380.95, 40225.0, 9833.75)
+        payslip(YearMonth.of(2026, 9), 13, 0.0, 2181.82, 18909.09, 33489.0, 8186.99)
+    }
+
+    @Test
+    fun manualBonusSumWins() {
+        val ym = YearMonth.of(2026, 10)
+        val s = Settings(salary = 32000.0).copy(monthOverrides = mapOf("2026-10" to MonthOverride(bonus = 60000.0)))
+        val sum = Calculator.monthSummary(ym, Report(emptyList(), 0, 0.0, 0.0, null), s)
+        assertEquals(60000.0, sum.bonus)
+        assertTrue(sum.bonusIsManual)
     }
 
     @Test
     fun monthOverridesWin() {
-        val s = Settings(salary = 32000.0, bonus = 50000.0).copy(
-            monthOverrides = mapOf("2026-10" to MonthOverride(norm = 160.0, bonus = 60000.0)),
+        val s = Settings(salary = 32000.0).copy(
+            monthOverrides = mapOf("2026-10" to MonthOverride(norm = 160.0, bonusPercent = 150.0, workedDays = 10)),
         )
         val oct = YearMonth.of(2026, 10)
         assertEquals(160.0, s.normFor(oct))
         assertFalse(s.normIsAuto(oct))
-        assertEquals(60000.0, s.bonusFor(oct))
+        assertEquals(150.0, s.bonusPercentFor(oct))
         assertEquals(200.0, s.hourlyRate(oct))
+        assertEquals(21, s.normDays(oct))
+        assertEquals(32000.0 * 10 / 21, s.okladFor(oct), 0.001)
         val nov = YearMonth.of(2026, 11)
         assertEquals(159.0, s.normFor(nov))
         assertTrue(s.normIsAuto(nov))
-        assertEquals(50000.0, s.bonusFor(nov))
+        assertEquals(Settings.DEFAULT_BONUS_PERCENT, s.bonusPercentFor(nov))
+        assertEquals(32000.0, s.okladFor(nov), 0.001)
     }
 
     @Test
     fun reportAppliesDistrictCoefficient() {
-        val s = pay(100.0).copy(districtPercent = 15.0)
+        val s = pay(100.0).copy(districtPercent = 15.0, bonusPercent = 0.0)
         val spans = listOf(Span(LocalDateTime.of(2026, 10, 26, 17, 0), LocalDateTime.of(2026, 10, 26, 20, 0), false))
         val r = Calculator.report(LocalDate.of(2026, 10, 26), LocalDate.of(2026, 10, 26), spans, s)
         assertEquals(500.0, r.totalMoney)
         assertEquals(575.0, r.totalGross)
+    }
+
+    @Test
+    fun dayBonusAndNet() {
+        val s = pay(100.0) // ставка 100, без районного, премия 158,78125%, НДФЛ 13%
+        val weekday = LocalDate.of(2026, 10, 26)
+        val sat = LocalDate.of(2026, 10, 31)
+        val spans = listOf(
+            Span(weekday.atTime(17, 0), weekday.atTime(20, 0), false), // 3 ч: 2*1.5 + 1*2 = 5 ставок
+            Span(sat.atTime(8, 0), sat.atTime(17, 0), false),        // 8 ч после обеда, x2
+        )
+        val r = Calculator.report(weekday, sat, spans, s)
+        val wd = r.days.first { it.date == weekday }
+        assertEquals(500.0, wd.money)
+        assertEquals(500.0, wd.bonusBase)
+        assertEquals(793.91, wd.bonus, 0.01)
+        assertEquals(1293.91, wd.withBonus, 0.01)
+        assertEquals(1125.70, wd.net, 0.01)
+        val we = r.days.first { it.date == sat }
+        assertEquals(1600.0, we.money)
+        assertEquals(800.0, we.bonusBase) // в базу премии идёт только одинарная оплата выходного
+        assertEquals(1270.25, we.bonus, 0.01)
+        assertEquals(2870.25, we.withBonus, 0.01)
+        assertEquals(1300.0, r.totalBonusBase)
     }
 }
 

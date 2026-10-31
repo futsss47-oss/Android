@@ -247,11 +247,16 @@ fun SettingsScreen(vm: AppViewModel) {
         // ---- оплата ----
         SettingsGroup(
             title = "Оплата",
-            summary = "Оклад ${formatRub(draft.salary)} · премия ${formatRub(draft.bonus)} · " +
+            summary = "Оклад ${formatRub(draft.salary)} · премия ${formatPercent(draft.bonusPercent)} · " +
                 "районный ${formatPercent(draft.districtPercent)}",
         ) {
             DecimalField("Оклад в месяц", draft.salary, "₽") { draft = draft.copy(salary = it) }
-            DecimalField("Премия в месяц (без сверхурочных)", draft.bonus, "₽") { draft = draft.copy(bonus = it) }
+            DecimalField("Коэффициент премии", draft.bonusPercent, "%") { draft = draft.copy(bonusPercent = it) }
+            Hint(
+                "Премия = коэффициент × (оклад за отработанные дни + выходные в одинарном размере + сверхурочные). " +
+                    "158,78% выведено из ваших расчётных листков. Для конкретного месяца можно вписать свой " +
+                    "коэффициент или точную сумму из листка на вкладке «Месяц».",
+            )
             DecimalField("Районный коэффициент", draft.districtPercent, "%") { draft = draft.copy(districtPercent = it) }
             DecimalField("НДФЛ", draft.taxPercent, "%") { draft = draft.copy(taxPercent = it) }
             Hint(
