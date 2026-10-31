@@ -80,10 +80,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         GeofenceHelper.register(app, settings.value)
     }
 
-    fun saveSettings(s: Settings) {
+    fun saveSettings(draft: Settings) {
+        // Отметки дней и правки месяцев меняются на вкладке «Месяц», черновик настроек их не трогает.
+        val current = app.settingsRepo.current()
+        val s = draft.copy(monthOverrides = current.monthOverrides, absences = current.absences)
         app.settingsRepo.save(s)
         GeofenceHelper.register(app, s)
         MonthReminder.schedule(app, s)
+    }
+
+    /** Отметить день отсутствия (null — работал). */
+    fun setAbsence(date: java.time.LocalDate, absence: ru.overtime.domain.Absence?) {
+        val s = app.settingsRepo.current()
+        val map = s.absences.toMutableMap()
+        if (absence == null) map.remove(date) else map[date] = absence
+        app.settingsRepo.save(s.copy(absences = map))
     }
 
     /** Правка дней, нормы и премии одного месяца. Пустые поля = автоматически / из общих настроек. */

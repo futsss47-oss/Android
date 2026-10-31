@@ -21,8 +21,12 @@ private val SAT = LocalDate.of(2026, 10, 31)
 private fun at(d: LocalDate, h: Int, m: Int = 0): LocalDateTime = d.atTime(h, m)
 
 /** Настройки с часовой ставкой ровно [rate] в октябре 2026: оклад rate*100 при норме 100 ч, без районного коэффициента. */
+/** Коэффициент премии из расчётных листков: 50 810 / 32 000. */
+private const val PAYSLIP_BONUS = 158.78125
+
 private fun pay(rate: Double) = Settings(
     salary = rate * 100,
+    bonusPercent = PAYSLIP_BONUS,
     districtPercent = 0.0,
     monthOverrides = mapOf("2026-10" to MonthOverride(norm = 100.0)),
 )
@@ -512,7 +516,7 @@ class MonthSummaryTest {
         expectedBonus: Double,
         expectedDistrict: Double,
     ) {
-        val s = Settings(salary = 32000.0).copy(
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS).copy(
             monthOverrides = mapOf(ym.toString() to MonthOverride(workedDays = worked)),
         )
         val report = Report(
@@ -546,7 +550,7 @@ class MonthSummaryTest {
     @Test
     fun manualBonusSumWins() {
         val ym = YearMonth.of(2026, 10)
-        val s = Settings(salary = 32000.0).copy(monthOverrides = mapOf("2026-10" to MonthOverride(bonus = 60000.0)))
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS).copy(monthOverrides = mapOf("2026-10" to MonthOverride(bonus = 60000.0)))
         val sum = Calculator.monthSummary(ym, Report(emptyList(), 0, 0.0, 0.0, null), s)
         assertEquals(60000.0, sum.bonus)
         assertTrue(sum.bonusIsManual)
@@ -554,7 +558,7 @@ class MonthSummaryTest {
 
     @Test
     fun monthOverridesWin() {
-        val s = Settings(salary = 32000.0).copy(
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS).copy(
             monthOverrides = mapOf("2026-10" to MonthOverride(norm = 160.0, bonusPercent = 150.0, workedDays = 10)),
         )
         val oct = YearMonth.of(2026, 10)
@@ -567,7 +571,8 @@ class MonthSummaryTest {
         val nov = YearMonth.of(2026, 11)
         assertEquals(159.0, s.normFor(nov))
         assertTrue(s.normIsAuto(nov))
-        assertEquals(Settings.DEFAULT_BONUS_PERCENT, s.bonusPercentFor(nov))
+        assertEquals(PAYSLIP_BONUS, s.bonusPercentFor(nov))
+        assertEquals(0.0, Settings().bonusPercent) // новые установки — без премии
         assertEquals(32000.0, s.okladFor(nov), 0.001)
     }
 
@@ -676,7 +681,7 @@ class AdvanceTest {
     )
 
     private fun advanceOf(ym: YearMonth, absences: Map<LocalDate, Absence>, extraFirstHalf: Double): AdvanceSummary {
-        val s = Settings(salary = 32000.0, absences = absences)
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS, absences = absences)
         val days = if (extraFirstHalf > 0) listOf(day(ym.atDay(5), extraFirstHalf)) else emptyList()
         val report = Report(days, 0, extraFirstHalf, 0.0, null, totalBonusBase = extraFirstHalf)
         val summary = Calculator.monthSummary(ym, report, s)
@@ -687,7 +692,7 @@ class AdvanceTest {
     fun august2025SickLeave() {
         // больничный 04.08–09.08.2025: в листке отработано 16 дней, аванс 9 147,29
         val sick = dates(LocalDate.of(2025, 8, 4), LocalDate.of(2025, 8, 9)).associateWith { Absence.SICK }
-        val s = Settings(salary = 32000.0, absences = sick)
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS, absences = sick)
         assertEquals(16, s.workedDaysFor(YearMonth.of(2025, 8)))
         val a = advanceOf(YearMonth.of(2025, 8), sick, 0.0)
         assertEquals(6, a.workedFirstHalf)
@@ -699,7 +704,7 @@ class AdvanceTest {
         // больничный 05.08–10.08.2026, отпуск 31.08; 3 ч сверхурочных в первой половине; аванс 10 100,53
         val abs = dates(LocalDate.of(2026, 8, 5), LocalDate.of(2026, 8, 10)).associateWith { Absence.SICK } +
             (LocalDate.of(2026, 8, 31) to Absence.VACATION)
-        val s = Settings(salary = 32000.0, absences = abs)
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS, absences = abs)
         assertEquals(16, s.workedDaysFor(YearMonth.of(2026, 8)))
         val a = advanceOf(YearMonth.of(2026, 8), abs, 952.38)
         assertEquals(6, a.workedFirstHalf)
@@ -710,7 +715,7 @@ class AdvanceTest {
     fun september2026Vacation() {
         // отпуск 01.09–11.09.2026: отработано 13 дней, аванс 4 002,00 (3 ч сверхурочных оплачены 1 090,91)
         val vac = dates(LocalDate.of(2026, 9, 1), LocalDate.of(2026, 9, 11)).associateWith { Absence.VACATION }
-        val s = Settings(salary = 32000.0, absences = vac)
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS, absences = vac)
         assertEquals(13, s.workedDaysFor(YearMonth.of(2026, 9)))
         val a = advanceOf(YearMonth.of(2026, 9), vac, 1090.91)
         assertEquals(2, a.workedFirstHalf)
@@ -727,7 +732,7 @@ class AdvanceTest {
 
     @Test
     fun absenceOnHolidayIsIgnored() {
-        val s = Settings(salary = 32000.0, absences = mapOf(LocalDate.of(2026, 11, 4) to Absence.VACATION))
+        val s = Settings(salary = 32000.0, bonusPercent = PAYSLIP_BONUS, absences = mapOf(LocalDate.of(2026, 11, 4) to Absence.VACATION))
         assertEquals(s.normDays(YearMonth.of(2026, 11)), s.workedDaysFor(YearMonth.of(2026, 11)))
     }
 }

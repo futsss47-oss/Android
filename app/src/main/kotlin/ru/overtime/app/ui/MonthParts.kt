@@ -161,10 +161,13 @@ fun MonthParamsDialog(
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 NumberField(
-                    daysText, { daysText = it }, "Отработано дней", "все: ${summary.normDays}", "дн.", daysBad,
+                    daysText, { daysText = it }, "Отработано дней", "по календарю", "дн.", daysBad,
                     decimal = false,
                 )
-                Hint("Если были больничный, отпуск или отгул. Оклад и премия уменьшатся пропорционально.")
+                Hint(
+                    "Лучше отмечать отпуск и больничный в календаре на вкладке «Месяц»: тогда точно посчитается " +
+                        "и аванс. Это поле нужно, только если хотите вписать число дней вручную.",
+                )
                 NumberField(normText, { normText = it }, "Норма часов", "авто: ${formatHours(autoNorm)}", "ч", normBad)
                 NumberField(
                     percentText, { percentText = it }, "Коэффициент премии", "общий: ${formatPercent(defaultBonusPercent)}",

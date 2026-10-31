@@ -69,6 +69,7 @@ fun HomeScreen(vm: AppViewModel) {
 
     val thisMonth = YearMonth.from(now)
     val summary = remember(report, settings, thisMonth) { Calculator.monthSummary(thisMonth, report, settings) }
+    val advance = remember(report, settings, thisMonth, summary) { Calculator.advance(thisMonth, report, summary, settings) }
 
     val manualOpen = sessions.firstOrNull { it.manual && it.endMillis == null }
     val manualStart = manualOpen?.let { TimeConv.toLocal(it.startMillis) }
@@ -124,6 +125,18 @@ fun HomeScreen(vm: AppViewModel) {
             )
         }
 
+        if (settings.salary <= 0.0) {
+            SoftCard(container = MaterialTheme.colorScheme.tertiaryContainer) {
+                Text("Заполните оплату", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Откройте «Настройки → Оплата» и впишите оклад и коэффициент премии. Коэффициент можно " +
+                        "посчитать по своему расчётному листку: премия / (оклад + выходные + сверхурочные) × 100%. " +
+                        "Если премии нет, оставьте 0.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         SoftCard(container = MaterialTheme.colorScheme.primaryContainer) {
             Text(
                 "Ожидается на руки за ${thisMonth.format(MONTH_FMT)}",
@@ -138,6 +151,11 @@ fun HomeScreen(vm: AppViewModel) {
             Text(
                 "Начислено ${formatMoney(summary.gross)}: оклад, премия, районный коэффициент, выходные и сверхурочные",
                 style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Text(
+                "Аванс ≈ ${formatMoney(advance.net)} · остаток ≈ ${formatMoney(advance.rest)}",
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             report.formulaError?.let {

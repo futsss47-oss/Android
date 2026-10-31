@@ -70,6 +70,7 @@ fun MonthScreen(vm: AppViewModel) {
     var editingMonth by remember { mutableStateOf(false) }
 
     val summary = remember(month, report, settings) { Calculator.monthSummary(month, report, settings) }
+    val advance = remember(month, report, settings, summary) { Calculator.advance(month, report, summary, settings) }
     val monthSessions = sessions.filter { YearMonth.from(TimeConv.toLocal(it.startMillis)) == month }
     val monthTitle = month.format(MONTH_FMT)
 
@@ -129,6 +130,12 @@ fun MonthScreen(vm: AppViewModel) {
                     }
                 }
             }
+        }
+
+        item { AdvanceCard(advance, summary) }
+
+        item {
+            AbsenceCalendarCard(month, settings, report) { date, a -> vm.setAbsence(date, a) }
         }
 
         item {

@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
+import ru.overtime.domain.Absence
 import ru.overtime.domain.DayRule
 import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.OvertimeMode
@@ -12,6 +13,7 @@ import ru.overtime.domain.Settings
 import ru.overtime.domain.StateStore
 import ru.overtime.domain.TrackerState
 import java.time.DayOfWeek
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 
@@ -85,6 +87,9 @@ object SettingsJson {
             months.put(key, mj)
         }
         o.put("months", months)
+        val abs = JSONObject()
+        for ((date, a) in s.absences) abs.put(date.toString(), a.name)
+        o.put("absences", abs)
         return o.toString()
     }
 
@@ -126,11 +131,23 @@ object SettingsJson {
             districtPercent = o.optDouble("district", d.districtPercent),
             taxPercent = o.optDouble("tax", d.taxPercent),
             monthOverrides = decodeMonths(o.optJSONObject("months")),
+            absences = decodeAbsences(o.optJSONObject("absences")),
         )
     }
 
     private inline fun <reified E : Enum<E>> enumOr(name: String, default: E): E =
         enumValues<E>().firstOrNull { it.name == name } ?: default
+
+    private fun decodeAbsences(json: JSONObject?): Map<LocalDate, Absence> {
+        if (json == null) return emptyMap()
+        val result = mutableMapOf<LocalDate, Absence>()
+        for (key in json.keys()) {
+            val date = runCatching { LocalDate.parse(key) }.getOrNull() ?: continue
+            val a = Absence.values().firstOrNull { it.name == json.optString(key) } ?: continue
+            result[date] = a
+        }
+        return result
+    }
 
     private fun decodeMonths(json: JSONObject?): Map<String, MonthOverride> {
         if (json == null) return emptyMap()
