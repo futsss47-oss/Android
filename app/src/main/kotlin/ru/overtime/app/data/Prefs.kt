@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 import ru.overtime.domain.Absence
+import ru.overtime.domain.DayKind
 import ru.overtime.domain.DayRule
 import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.OvertimeMode
@@ -90,6 +91,17 @@ object SettingsJson {
         val abs = JSONObject()
         for ((date, a) in s.absences) abs.put(date.toString(), a.name)
         o.put("absences", abs)
+        val cal = JSONObject()
+        for ((date, k) in s.calendarOverrides) cal.put(date.toString(), k.name)
+        o.put("calendar", cal)
+        o.put("nightOn", s.nightEnabled)
+        o.put("nightPct", s.nightPercent)
+        o.put("nightS", s.nightStart.toString())
+        o.put("nightE", s.nightEnd.toString())
+        o.put("sickPct", s.sickPercent)
+        s.vacationEarnings12m?.let { o.put("vacEarn", it) }
+        s.sickEarnings2y?.let { o.put("sickEarn", it) }
+        o.put("wallpaper", s.wallpaperColors)
         return o.toString()
     }
 
@@ -132,6 +144,15 @@ object SettingsJson {
             taxPercent = o.optDouble("tax", d.taxPercent),
             monthOverrides = decodeMonths(o.optJSONObject("months")),
             absences = decodeAbsences(o.optJSONObject("absences")),
+            calendarOverrides = decodeCalendar(o.optJSONObject("calendar")),
+            nightEnabled = o.optBoolean("nightOn", d.nightEnabled),
+            nightPercent = o.optDouble("nightPct", d.nightPercent),
+            nightStart = LocalTime.parse(o.optString("nightS", d.nightStart.toString())),
+            nightEnd = LocalTime.parse(o.optString("nightE", d.nightEnd.toString())),
+            sickPercent = o.optDouble("sickPct", d.sickPercent),
+            vacationEarnings12m = if (o.has("vacEarn")) o.getDouble("vacEarn") else null,
+            sickEarnings2y = if (o.has("sickEarn")) o.getDouble("sickEarn") else null,
+            wallpaperColors = o.optBoolean("wallpaper", d.wallpaperColors),
         )
     }
 
@@ -145,6 +166,17 @@ object SettingsJson {
             val date = runCatching { LocalDate.parse(key) }.getOrNull() ?: continue
             val a = Absence.values().firstOrNull { it.name == json.optString(key) } ?: continue
             result[date] = a
+        }
+        return result
+    }
+
+    private fun decodeCalendar(json: JSONObject?): Map<LocalDate, DayKind> {
+        if (json == null) return emptyMap()
+        val result = mutableMapOf<LocalDate, DayKind>()
+        for (key in json.keys()) {
+            val date = runCatching { LocalDate.parse(key) }.getOrNull() ?: continue
+            val k = DayKind.values().firstOrNull { it.name == json.optString(key) } ?: continue
+            result[date] = k
         }
         return result
     }

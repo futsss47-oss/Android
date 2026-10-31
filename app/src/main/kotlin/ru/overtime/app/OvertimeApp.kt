@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import ru.overtime.app.data.AppDatabase
+import ru.overtime.app.data.SessionEntity
+import ru.overtime.app.tile.ManualTileService
 import ru.overtime.app.data.PrefsStateStore
 import ru.overtime.app.data.RoomSessionGateway
 import ru.overtime.app.data.SettingsRepository
@@ -56,6 +58,38 @@ class OvertimeApp : Application() {
     }
 
     fun trackerState(): TrackerState = synchronized(lock) { engine.state() }
+
+    // ---- ручной режим: общий для приложения, виджетов и плитки в шторке ----
+
+    /** Только не из главного потока. */
+    fun isManualRunning(): Boolean = db.sessionDao().openManual() != null
+
+    /** Только не из главного потока. Запускает ручную сверхурочную, если она ещё не идёт. */
+    fun manualStart() {
+        val dao = db.sessionDao()
+        if (dao.openManual() == null) {
+            dao.insert(SessionEntity(startMillis = System.currentTimeMillis(), endMillis = null, manual = true))
+        }
+        onManualChanged()
+    }
+
+    /** Только не из главного потока. */
+    fun manualStop() {
+        val dao = db.sessionDao()
+        dao.openManual()?.let { dao.setEnd(it.id, System.currentTimeMillis()) }
+        onManualChanged()
+    }
+
+    /** Только не из главного потока. Возвращает true, если после нажатия сверхурочная идёт. */
+    fun manualToggle(): Boolean {
+        if (isManualRunning()) manualStop() else manualStart()
+        return isManualRunning()
+    }
+
+    private fun onManualChanged() {
+        WidgetUpdater.request(this)
+        ManualTileService.requestUpdate(this)
+    }
 
     /** Только не из главного потока: пишет в базу. */
     fun tick() {

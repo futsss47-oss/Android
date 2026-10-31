@@ -28,7 +28,9 @@ import ru.overtime.app.data.TimeConv
 import ru.overtime.app.location.GeofenceHelper
 import ru.overtime.app.location.Perms
 import ru.overtime.app.reminder.MonthReminder
-import ru.overtime.domain.Calculator
+import ru.overtime.domain.DayKind
+import ru.overtime.domain.MonthCalc
+import ru.overtime.domain.MonthCalculator
 import ru.overtime.domain.MonthOverride
 import ru.overtime.domain.Report
 import ru.overtime.domain.Settings
@@ -61,14 +63,26 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TrackerState())
 
-    val monthReport: StateFlow<Report> = reportFor(month)
-    val homeReport: StateFlow<Report> = reportFor(clock.map { YearMonth.from(it) }.distinctUntilChanged())
+    /** Выбранный на вкладке «Месяц» месяц: отчёт, листок, аванс, отпускные и больничные. */
+    val monthCalc: StateFlow<MonthCalc> = calcFor(month)
 
-    private fun reportFor(months: Flow<YearMonth>): StateFlow<Report> =
+    /** Текущий месяц для главного экрана. */
+    val homeCalc: StateFlow<MonthCalc> = calcFor(clock.map { YearMonth.from(it) }.distinctUntilChanged())
+
+    val monthReport: StateFlow<Report> = monthCalc.map { it.report }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EMPTY_REPORT)
+    val homeReport: StateFlow<Report> = homeCalc.map { it.report }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EMPTY_REPORT)
+
+    private fun calcFor(months: Flow<YearMonth>): StateFlow<MonthCalc> =
         combine(sessions, settings, months, clock) { list, s, ym, now ->
-            Calculator.report(ym.atDay(1), ym.atEndOfMonth(), list.map { it.toSpan(now) }, s)
+            MonthCalculator.calc(ym, list.map { it.toSpan(now) }, s)
         }.flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EMPTY_REPORT)
+            .stateIn(
+                viewModelScope,
+                SharingStarted.WhileSubscribed(5_000),
+                MonthCalculator.calc(YearMonth.now(), emptyList(), app.settingsRepo.current()),
+            )
 
     init {
         // Закрыть сессию, у которой окно сверхурочной уже закончилось, пока приложение не работало.
@@ -83,7 +97,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun saveSettings(draft: Settings) {
         // Отметки дней и правки месяцев меняются на вкладке «Месяц», черновик настроек их не трогает.
         val current = app.settingsRepo.current()
-        val s = draft.copy(monthOverrides = current.monthOverrides, absences = current.absences)
+        val s = draft.copy(
+            monthOverrides = current.monthOverrides,
+            absences = current.absences,
+            calendarOverrides = current.calendarOverrides,
+        )
         app.settingsRepo.save(s)
         GeofenceHelper.register(app, s)
         MonthReminder.schedule(app, s)
@@ -95,6 +113,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val map = s.absences.toMutableMap()
         if (absence == null) map.remove(date) else map[date] = absence
         app.settingsRepo.save(s.copy(absences = map))
+    }
+
+    /** Своя правка типа дня в календаре (null — как в производственном календаре). */
+    fun setDayKind(date: java.time.LocalDate, kind: DayKind?) {
+        val s = app.settingsRepo.current()
+        val map = s.calendarOverrides.toMutableMap()
+        if (kind == null) map.remove(date) else map[date] = kind
+        app.settingsRepo.save(s.copy(calendarOverrides = map))
+    }
+
+    /** Оформление меняется сразу, без кнопки «Сохранить». */
+    fun setWallpaperColors(on: Boolean) {
+        val s = app.settingsRepo.current()
+        app.settingsRepo.save(s.copy(wallpaperColors = on))
     }
 
     /** Правка дней, нормы и премии одного месяца. Пустые поля = автоматически / из общих настроек. */
@@ -119,35 +151,36 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- ручной режим и правка записей ----
 
-    fun manualStart() = io {
-        if (dao.openManual() == null) {
-            dao.insert(SessionEntity(startMillis = nowMillis(), endMillis = null, manual = true))
-        }
-    }
+    fun manualStart() = io { app.manualStart() }
 
-    fun manualStop() = io {
-        dao.openManual()?.let { dao.setEnd(it.id, nowMillis()) }
-    }
+    fun manualStop() = io { app.manualStop() }
 
-    fun addSession(start: LocalDateTime, end: LocalDateTime) = io {
+    fun addSession(start: LocalDateTime, end: LocalDateTime, note: String? = null) = io {
         dao.insert(
             SessionEntity(
                 startMillis = TimeConv.toMillis(start),
                 endMillis = TimeConv.toMillis(end),
                 manual = true,
+                note = note?.trim()?.ifEmpty { null },
             ),
         )
     }
 
-    fun updateSession(old: SessionEntity, start: LocalDateTime, end: LocalDateTime) = io {
+    fun updateSession(old: SessionEntity, start: LocalDateTime, end: LocalDateTime, note: String? = old.note) = io {
+        val timeChanged = old.startMillis != TimeConv.toMillis(start) || old.endMillis != TimeConv.toMillis(end)
         dao.update(
             old.copy(
                 startMillis = TimeConv.toMillis(start),
                 endMillis = TimeConv.toMillis(end),
-                edited = !old.manual,
+                // правка только заметки не делает автоматическую запись «исправленной»
+                edited = old.edited || (!old.manual && timeChanged),
+                note = note?.trim()?.ifEmpty { null },
             ),
         )
     }
+
+    /** Заметка к записи, в том числе к идущей. */
+    fun setNote(id: Long, note: String?) = io { dao.setNote(id, note?.trim()?.ifEmpty { null }) }
 
     fun deleteSession(id: Long) = io { dao.delete(id) }
 
@@ -155,7 +188,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) { block() }
     }
 
-    private fun nowMillis(): Long = System.currentTimeMillis()
 
     private companion object {
         val EMPTY_REPORT = Report(emptyList(), 0, 0.0, 0.0, null)

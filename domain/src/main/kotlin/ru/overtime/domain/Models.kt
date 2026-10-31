@@ -25,6 +25,13 @@ enum class Absence(val title: String) {
     DAY_OFF("Отгул"),
 }
 
+/** Ручная правка типа дня в производственном календаре (например, новый праздник РБ). */
+enum class DayKind(val title: String) {
+    HOLIDAY("Праздник / выходной"),
+    WORKDAY("Рабочий, 8 ч"),
+    SHORT("Сокращённый, 7 ч"),
+}
+
 /**
  * Правка параметров одного месяца. null означает «взять автоматически / из общих настроек».
  * [bonus] — точная сумма премии из расчётного листка (тогда коэффициент не используется).
@@ -84,7 +91,37 @@ data class Settings(
     val monthOverrides: Map<String, MonthOverride> = emptyMap(),
     /** Дни отсутствия: отпуск, больничный, отгул. */
     val absences: Map<LocalDate, Absence> = emptyMap(),
+    /** Свои правки производственного календаря: праздник, рабочий или сокращённый день. */
+    val calendarOverrides: Map<LocalDate, DayKind> = emptyMap(),
+    /** Доплата за ночные часы (ст. 154 ТК РФ) в сверхурочной и в выходные. */
+    val nightEnabled: Boolean = false,
+    val nightPercent: Double = 20.0,
+    val nightStart: LocalTime = LocalTime.of(22, 0),
+    val nightEnd: LocalTime = LocalTime.of(6, 0),
+    /** Процент оплаты больничного по стажу: 60 (до 5 лет), 80 (5–8 лет), 100 (от 8 лет). */
+    val sickPercent: Double = 100.0,
+    /** Начисления за 12 месяцев до отпуска из бухгалтерии; null — оценить по приложению. */
+    val vacationEarnings12m: Double? = null,
+    /** Начисления за 2 предыдущих года для больничного; null — оценить по приложению. */
+    val sickEarnings2y: Double? = null,
+    /** Цвета из обоев (Material You) вместо фирменных. */
+    val wallpaperColors: Boolean = false,
 ) {
+    /** Длительность дня по календарю с учётом своих правок: 0, 7 или 8 часов. */
+    fun dayHours(date: LocalDate): Int = when (calendarOverrides[date]) {
+        DayKind.HOLIDAY -> 0
+        DayKind.WORKDAY -> 8
+        DayKind.SHORT -> 7
+        null -> ProductionCalendar.hours(date)
+    }
+
+    /** Норма часов месяца по календарю (с правками дней, без правки нормы месяца). */
+    fun calendarNormHours(month: YearMonth): Int = (1..month.lengthOfMonth()).sumOf { dayHours(month.atDay(it)) }
+
+    /** Праздник (для отпуска: праздничные дни в отпуск не входят и не оплачиваются). */
+    fun isHoliday(date: LocalDate): Boolean =
+        calendarOverrides[date] == DayKind.HOLIDAY || ProductionCalendar.isHoliday(date)
+
     fun rule(day: DayOfWeek): DayRule = days[day] ?: DayRule(false)
 
     /**
@@ -93,7 +130,7 @@ data class Settings(
      * в сокращённый день смена на час короче.
      */
     fun ruleFor(date: LocalDate): DayRule {
-        val hours = ProductionCalendar.hours(date)
+        val hours = dayHours(date)
         if (hours == 0) return DayRule(false)
         val base = rule(date.dayOfWeek)
         val weekendDay = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
@@ -114,7 +151,7 @@ data class Settings(
 
     /** Норма часов месяца: правка пользователя или расчёт по календарю. */
     fun normFor(month: YearMonth): Double =
-        monthOverrides[month.toString()]?.norm ?: ProductionCalendar.normHours(month).toDouble()
+        monthOverrides[month.toString()]?.norm ?: calendarNormHours(month).toDouble()
 
     fun normIsAuto(month: YearMonth): Boolean = monthOverrides[month.toString()]?.norm == null
 
@@ -129,10 +166,10 @@ data class Settings(
     fun bonusSumOverride(month: YearMonth): Double? = override(month)?.bonus
 
     /** Рабочих дней в месяце по календарю РБ. */
-    fun normDays(month: YearMonth): Int = ProductionCalendar.workDays(month)
+    fun normDays(month: YearMonth): Int = (1..month.lengthOfMonth()).count { dayHours(month.atDay(it)) > 0 }
 
     /** Рабочий ли день по календарю РБ (без учёта отсутствий). */
-    fun isCalendarWorkday(date: LocalDate): Boolean = ProductionCalendar.hours(date) > 0
+    fun isCalendarWorkday(date: LocalDate): Boolean = dayHours(date) > 0
 
     /** Рабочие дни месяца по календарю в диапазоне чисел [fromDay]..[toDay]. */
     fun workdaysIn(month: YearMonth, fromDay: Int, toDay: Int): List<LocalDate> =
@@ -181,6 +218,10 @@ data class Settings(
         if (bonusPercent < 0 || bonusPercent > 1000) errors += "Коэффициент премии должен быть от 0 до 1000%"
         if (districtPercent < 0 || districtPercent > 100) errors += "Районный коэффициент должен быть от 0 до 100%"
         if (taxPercent < 0 || taxPercent > 100) errors += "НДФЛ должен быть от 0 до 100%"
+        if (nightPercent < 0 || nightPercent > 200) errors += "Доплата за ночные часы должна быть от 0 до 200%"
+        if (nightEnabled && nightStart == nightEnd) errors += "Начало и конец ночного времени совпадают"
+        if (sickPercent < 0 || sickPercent > 100) errors += "Процент больничного должен быть от 0 до 100%"
+        if ((vacationEarnings12m ?: 0.0) < 0 || (sickEarnings2y ?: 0.0) < 0) errors += "Начисления не могут быть отрицательными"
         for ((key, o) in monthOverrides) {
             if ((o.norm ?: 0.0) < 0 || (o.bonus ?: 0.0) < 0 || (o.bonusPercent ?: 0.0) < 0 || (o.workedDays ?: 0) < 0) {
                 errors += "Отрицательное значение в правке месяца $key"

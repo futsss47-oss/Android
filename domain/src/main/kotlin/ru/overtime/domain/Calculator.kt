@@ -27,6 +27,10 @@ data class DayResult(
     val withBonus: Double,
     /** На руки за день: начислено с премией минус НДФЛ. */
     val net: Double,
+    /** Из засчитанных минут ночных (по умолчанию 22:00–6:00). */
+    val nightMinutes: Int = 0,
+    /** Доплата за ночные часы, до районного коэффициента. */
+    val nightPay: Double = 0.0,
 )
 
 data class Report(
@@ -44,6 +48,9 @@ data class Report(
     val totalWithBonus: Double = 0.0,
     /** На руки за переработки с премией. */
     val totalNet: Double = 0.0,
+    val totalNightMinutes: Int = 0,
+    /** Доплата за ночные часы за период, до районного коэффициента. */
+    val totalNightPay: Double = 0.0,
 )
 
 /** Расчёт месяца в виде расчётного листка. */
@@ -72,6 +79,13 @@ data class MonthSummary(
     val gross: Double,
     val tax: Double,
     val net: Double,
+    /** Доплата за ночные часы, до районного коэффициента (уже входит в [base]). */
+    val night: Double = 0.0,
+    /** Отпускные и больничные (входят в [gross], районный на них не начисляется). */
+    val vacationPay: Double = 0.0,
+    val sickPay: Double = 0.0,
+    /** Заработок месяца для расчёта среднего: начислено без отпускных и больничных. */
+    val earningsForAverage: Double = 0.0,
 )
 
 /**
@@ -98,6 +112,40 @@ object Calculator {
 
     /** Сколько минут сверхурочной набралось за дату до округления и порогов. */
     fun rawMinutes(date: LocalDate, spans: List<Span>, s: Settings): Int {
+        val merged = mergedParts(date, spans, s)
+        var seconds = merged.sumOf { it.seconds }
+        seconds -= lunchSeconds(date, merged, s)
+        return (seconds / 60).toInt()
+    }
+
+    /** Ночные минуты внутри засчитанного времени дня (без обеда), до округления. */
+    fun nightRawMinutes(date: LocalDate, spans: List<Span>, s: Settings): Int {
+        if (!s.nightEnabled || s.nightStart == s.nightEnd) return 0
+        val nights = nightIntervals(date, s)
+        val nightParts = union(mergedParts(date, spans, s).flatMap { m -> nights.mapNotNull { m.intersect(it) } })
+        val seconds = nightParts.sumOf { it.seconds } - lunchSeconds(date, nightParts, s)
+        return (seconds / 60).toInt().coerceAtLeast(0)
+    }
+
+    /** Ночное время, попадающее в сутки [date]: утренний хвост и вечернее начало. */
+    private fun nightIntervals(date: LocalDate, s: Settings): List<Interval> {
+        val d0 = date.atStartOfDay()
+        val d1 = date.plusDays(1).atStartOfDay()
+        return if (s.nightStart.isAfter(s.nightEnd)) {
+            listOf(Interval(d0, date.atTime(s.nightEnd)), Interval(date.atTime(s.nightStart), d1))
+        } else {
+            listOf(Interval(date.atTime(s.nightStart), date.atTime(s.nightEnd)))
+        }.filter { it.seconds > 0 }
+    }
+
+    private fun lunchSeconds(date: LocalDate, merged: List<Interval>, s: Settings): Long {
+        // Обед не оплачивается: вычитаем ту часть обеденного перерыва, когда человек был на работе.
+        if (!s.lunchEnabled || !s.lunchEnd.isAfter(s.lunchStart)) return 0L
+        val lunch = Interval(date.atTime(s.lunchStart), date.atTime(s.lunchEnd))
+        return merged.sumOf { it.intersect(lunch)?.seconds ?: 0L }
+    }
+
+    private fun mergedParts(date: LocalDate, spans: List<Span>, s: Settings): List<Interval> {
         val d0 = date.atStartOfDay()
         val dayInterval = Interval(d0, date.plusDays(1).atStartOfDay())
         val windows = Windows.forDate(date, s).map { Interval(it.start, it.end) }
@@ -111,14 +159,7 @@ object Calculator {
                 for (w in windows) iv.intersect(w)?.let { parts += it }
             }
         }
-        val merged = union(parts)
-        var seconds = merged.sumOf { it.seconds }
-        // Обед не оплачивается: вычитаем ту часть обеденного перерыва, когда человек был на работе.
-        if (s.lunchEnabled && s.lunchEnd.isAfter(s.lunchStart)) {
-            val lunch = Interval(date.atTime(s.lunchStart), date.atTime(s.lunchEnd))
-            seconds -= merged.sumOf { it.intersect(lunch)?.seconds ?: 0L }
-        }
-        return (seconds / 60).toInt()
+        return union(parts)
     }
 
     /** Применяет минимальный порог и округление. */
@@ -168,20 +209,24 @@ object Calculator {
                     0.0
                 }
                 val dayOff = !s.ruleFor(date).workday
+                val nightMinutes = if (counted > 0) nightRawMinutes(date, spans, s).coerceAtMost(counted) else 0
+                val nightPay = round2(s.hourlyRate(YearMonth.from(date)) * nightMinutes / 60.0 * s.nightPercent / 100.0)
                 val bonusBase = if (dayOff) money * Settings.WEEKEND_BONUS_SHARE else money
                 val bonus = bonusBase * s.bonusPercentFor(YearMonth.from(date)) / 100.0
-                val withBonus = (money + bonus) * k
+                val withBonus = (money + bonus + nightPay) * k
                 days += DayResult(
                     date = date,
                     rawMinutes = raw,
                     countedMinutes = counted,
                     dayOff = dayOff,
                     money = money,
-                    gross = round2(money * k),
+                    gross = round2((money + nightPay) * k),
                     bonusBase = round2(bonusBase),
                     bonus = round2(bonus),
                     withBonus = round2(withBonus),
                     net = round2(withBonus * (1.0 - s.taxPercent / 100.0)),
+                    nightMinutes = nightMinutes,
+                    nightPay = nightPay,
                 )
             }
             date = date.plusDays(1)
@@ -195,6 +240,8 @@ object Calculator {
             totalBonusBase = round2(days.sumOf { it.bonusBase }),
             totalWithBonus = round2(days.sumOf { it.withBonus }),
             totalNet = round2(days.sumOf { it.net }),
+            totalNightMinutes = days.sumOf { it.nightMinutes },
+            totalNightPay = round2(days.sumOf { it.nightPay }),
         )
     }
 
@@ -205,15 +252,17 @@ object Calculator {
      * на сумму районный коэффициент, из начисленного НДФЛ (округляется до рубля).
      * [report] должен быть отчётом за этот же месяц.
      */
-    fun monthSummary(month: YearMonth, report: Report, s: Settings): MonthSummary {
+    fun monthSummary(month: YearMonth, report: Report, s: Settings, leave: LeavePay? = null): MonthSummary {
         val oklad = round2(s.okladFor(month))
         val percent = s.bonusPercentFor(month)
         val bonusBase = round2(oklad + report.totalBonusBase)
         val manual = s.bonusSumOverride(month)
         val bonus = manual ?: round2(bonusBase * percent / 100.0)
-        val base = round2(oklad + report.totalMoney + bonus)
+        val base = round2(oklad + report.totalMoney + report.totalNightPay + bonus)
         val district = round2(base * s.districtPercent / 100.0)
-        val gross = round2(base + district)
+        val vacationPay = leave?.vacationPay ?: 0.0
+        val sickPay = leave?.sickPay ?: 0.0
+        val gross = round2(base + district + vacationPay + sickPay)
         val tax = Math.round(gross * s.taxPercent / 100.0).toDouble()
         return MonthSummary(
             month = month,
@@ -236,6 +285,10 @@ object Calculator {
             gross = gross,
             tax = tax,
             net = round2(gross - tax),
+            night = report.totalNightPay,
+            vacationPay = vacationPay,
+            sickPay = sickPay,
+            earningsForAverage = round2(base + district),
         )
     }
 
@@ -247,7 +300,9 @@ object Calculator {
         val firstHalf = s.workdaysIn(month, 1, ADVANCE_LAST_DAY).size
         val worked = (firstHalf - s.absentWorkdaysIn(month, 1, ADVANCE_LAST_DAY)).coerceAtLeast(0)
         val oklad = if (normDays > 0) round2(s.salary * worked / normDays) else 0.0
-        val extra = round2(report.days.filter { it.date.dayOfMonth <= ADVANCE_LAST_DAY }.sumOf { it.money })
+        val extra = round2(
+            report.days.filter { it.date.dayOfMonth <= ADVANCE_LAST_DAY }.sumOf { it.money + it.nightPay },
+        )
         val base = oklad + extra
         val district = round2(base * s.districtPercent / 100.0)
         val gross = round2(base + district)
@@ -264,5 +319,31 @@ object Calculator {
             net = net,
             rest = round2(summary.net - net),
         )
+    }
+}
+
+/** Всё по одному месяцу: отчёт по дням, листок, аванс, отпускные и больничные. */
+data class MonthCalc(
+    val report: Report,
+    val summary: MonthSummary,
+    val advance: AdvanceSummary,
+    val leave: LeavePay,
+)
+
+object MonthCalculator {
+    /** Отчёт и листок месяца без отпускных и больничных: заработок для расчёта среднего. */
+    fun baseEarnings(month: YearMonth, spans: List<Span>, s: Settings): Double {
+        val report = Calculator.report(month.atDay(1), month.atEndOfMonth(), spans, s)
+        return Calculator.monthSummary(month, report, s).earningsForAverage
+    }
+
+    fun calc(month: YearMonth, spans: List<Span>, s: Settings): MonthCalc {
+        val report = Calculator.report(month.atDay(1), month.atEndOfMonth(), spans, s)
+        // Средний заработок нужен только в месяц с отпуском или больничным: не считаем лишнего.
+        val earnings = HashMap<YearMonth, Double>()
+        val leave = Leave.compute(month, s) { m -> earnings.getOrPut(m) { baseEarnings(m, spans, s) } }
+        val summary = Calculator.monthSummary(month, report, s, leave)
+        val advance = Calculator.advance(month, report, summary, s)
+        return MonthCalc(report, summary, advance, leave)
     }
 }

@@ -16,7 +16,7 @@ import ru.overtime.app.location.Perms
 import ru.overtime.app.ui.MONTH_FMT
 import ru.overtime.app.ui.formatMinutes
 import ru.overtime.app.ui.formatRub
-import ru.overtime.domain.Calculator
+import ru.overtime.domain.MonthCalculator
 import ru.overtime.domain.ReminderTime
 import ru.overtime.domain.Settings
 import java.time.LocalDateTime
@@ -52,8 +52,9 @@ object MonthReminder {
         val now = LocalDateTime.now()
         val month = YearMonth.from(now)
         val spans = app.db.sessionDao().all().map { it.toSpan(now) }
-        val report = Calculator.report(month.atDay(1), month.atEndOfMonth(), spans, settings)
-        val summary = Calculator.monthSummary(month, report, settings)
+        val calc = MonthCalculator.calc(month, spans, settings)
+        val report = calc.report
+        val summary = calc.summary
 
         val text = "Сверхурочные и выходные за ${month.format(MONTH_FMT)}: ${formatMinutes(report.totalMinutes)}, " +
             "ожидается на руки ≈ ${formatRub(summary.net)}. Когда придёт расчётный листок, впишите фактическую " +

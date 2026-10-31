@@ -10,6 +10,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import ru.overtime.domain.SessionGateway
 import ru.overtime.domain.Span
@@ -29,6 +31,8 @@ data class SessionEntity(
     val endMillis: Long?,
     val manual: Boolean,
     val edited: Boolean = false,
+    /** Заметка: кто попросил остаться, что делали. */
+    val note: String? = null,
 ) {
     fun toSpan(now: LocalDateTime): Span = Span(
         start = TimeConv.toLocal(startMillis),
@@ -59,15 +63,27 @@ interface SessionDao {
 
     @Query("SELECT * FROM sessions WHERE manual = 1 AND endMillis IS NULL LIMIT 1")
     fun openManual(): SessionEntity?
+
+    @Query("UPDATE sessions SET note = :note WHERE id = :id")
+    fun setNote(id: Long, note: String?)
 }
 
-@Database(entities = [SessionEntity::class], version = 1, exportSchema = false)
+@Database(entities = [SessionEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
 
     companion object {
+        /** Версия 2: заметка к записи. */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sessions ADD COLUMN note TEXT")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
-            Room.databaseBuilder(context, AppDatabase::class.java, "overtime.db").build()
+            Room.databaseBuilder(context, AppDatabase::class.java, "overtime.db")
+                .addMigrations(MIGRATION_1_2)
+                .build()
     }
 }
 

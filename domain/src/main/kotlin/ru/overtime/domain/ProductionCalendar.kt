@@ -137,6 +137,24 @@ object ProductionCalendar {
     fun workDays(month: YearMonth): Int =
         (1..month.lengthOfMonth()).count { hours(month.atDay(it)) > 0 }
 
+    /** Региональные праздники РБ с плавающей датой (байрамы), по дате самого праздника. */
+    private val BAYRAMS: Set<LocalDate> = (
+        d(2025, 3, 30) + d(2025, 6, 6) +
+            d(2026, 3, 20) + d(2026, 5, 27)
+        ).toSet()
+
+    /** Постоянные праздники: ст. 112 ТК РФ и День Республики Башкортостан. */
+    private val FIXED: Set<Pair<Int, Int>> = setOf(
+        1 to 1, 1 to 2, 1 to 3, 1 to 4, 1 to 5, 1 to 6, 1 to 8,
+        2 to 23, 3 to 8, 5 to 1, 5 to 9, 6 to 12, 10 to 11, 11 to 4,
+    )
+
+    /**
+     * Нерабочий праздничный день (не путать с обычным выходным и переносом).
+     * Нужен для отпуска: праздники в календарные дни отпуска не входят.
+     */
+    fun isHoliday(date: LocalDate): Boolean = (date.monthValue to date.dayOfMonth) in FIXED || date in BAYRAMS
+
     fun isEstimated(year: Int): Boolean = data(year).estimated
 
     /** Предупреждение для пользователя, если данные за год неполные. */
