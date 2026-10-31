@@ -63,15 +63,34 @@ fun AbsenceCalendarCard(
     SoftCard {
         Text("Отпуск, больничный, отгул", style = MaterialTheme.typography.titleMedium)
         Hint("Выберите тип и нажимайте на дни. Повторное нажатие снимает отметку.")
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (a in Absence.values()) {
-                FilterChip(
-                    selected = !erase && brush == a,
-                    onClick = { brush = a; erase = false },
-                    label = { Text(a.title) },
-                )
+        // 4 варианта — сеткой 2×2 одинаковой ширины, чтобы влезали на любом экране
+        val options: List<Absence?> = Absence.values().toList() + listOf(null)
+        for (pair in options.chunked(2)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (a in pair) {
+                    val selected = if (a == null) erase else !erase && brush == a
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            if (a == null) {
+                                erase = true
+                            } else {
+                                brush = a
+                                erase = false
+                            }
+                        },
+                        label = {
+                            Text(
+                                a?.title ?: "Работал",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                            )
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            FilterChip(selected = erase, onClick = { erase = true }, label = { Text("Работал") })
         }
 
         Row(Modifier.fillMaxWidth()) {

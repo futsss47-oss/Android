@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -69,6 +72,26 @@ jobs:
           name: overtime-release-apk
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Скриншоты экранов
+        id: shots
+        continue-on-error: true
+        run: ./gradlew :app:recordPaparazziDebug --stacktrace
+
+      - name: Выложить скриншоты в ветку ui-snapshots
+        if: steps.shots.outcome == 'success'
+        continue-on-error: true
+        run: |
+          SRC=$(pwd)/app/src/test/snapshots/images
+          ls "$SRC"
+          DIR=$(mktemp -d)
+          cp "$SRC"/*.png "$DIR"/
+          cd "$DIR"
+          git init -q
+          git checkout -q -b ui-snapshots
+          git add .
+          git -c user.name="github-actions" -c user.email="actions@github.com" commit -q -m "Скриншоты для ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" ui-snapshots
 
       - name: Нет release-ключа
         if: env.HAS_RELEASE_KEY != 'true'

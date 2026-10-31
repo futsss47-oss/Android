@@ -66,12 +66,12 @@ private val AppTypography: Typography
 
 /** Цвета прежние: из обоев телефона (Material You), светлая или тёмная тема по системе. */
 @Composable
-fun AppTheme(content: @Composable () -> Unit) {
+fun AppTheme(dynamic: Boolean = true, content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val ctx = LocalContext.current
     val scheme = when {
-        Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(ctx)
-        Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
+        dynamic && Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(ctx)
+        dynamic && Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
         dark -> darkColorScheme()
         else -> lightColorScheme()
     }
