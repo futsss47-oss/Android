@@ -303,7 +303,7 @@ class App(ManualMixin):
         self.board_power = False                 # CH1 блока питания включён программой
         self.flashing = False; self.running = False; self.connecting = False
         self.locked = os.path.exists(LOCKFILE)
-        self.bad = {"ai": [False] * 8, "ao": [False] * 2}; self.phase_text = "Ожидание запуска"
+        self.bad = {"ai": [False] * 8, "ao": [False] * 2}; self.pt_bad = {"ai": {}, "ao": {}}; self.phase_text = "Ожидание запуска"
         self.err_count = 0
         self._scrollables = []
         self._save_job = None
@@ -585,7 +585,7 @@ class App(ManualMixin):
         self.t_dio = ttk.Treeview(p, columns=["m"] + [str(i) for i in range(16)], show="headings", height=4, selectmode="none")
         self.t_dio.heading("m", text=""); self.t_dio.column("m", width=130, anchor="w")
         for i in range(16):
-            self.t_dio.heading(str(i), text=str(i)); self.t_dio.column(str(i), width=34, anchor="center")
+            self.t_dio.heading(str(i), text=str(i + 1)); self.t_dio.column(str(i), width=34, anchor="center")
         self.t_dio.tag_configure("bad", foreground=ERR)
         self.t_dio.pack(fill="x")
         p = ttk.Frame(rn, padding=8); rn.add(p, text="Счётные входы")
@@ -609,6 +609,7 @@ class App(ManualMixin):
 
     def reset_tables(self):
         self.bad = {"ai": [False] * 8, "ao": [False] * 2}
+        self.pt_bad = {"ai": {}, "ao": {}}          # (канал, точка) -> вне допуска по последнему замеру
         for t, n in ((self.t_ai, 8), (self.t_ao, 2)):
             for iid in t.get_children(): t.delete(iid)
             for i, s in enumerate(DEF_SP): t.insert("", "end", iid=f"r{i}", values=[s] + [""] * n)
@@ -702,13 +703,20 @@ class App(ManualMixin):
         self.btn_skip.configure(state="normal" if (sec is not None and self.phase_text == "Прогрев") else "disabled")
 
     def set_point(self, kind, ch, i, sp, v, good):
+        """Точка AI/AO. Оценка ✔/✖ пересчитывается по ПОСЛЕДНЕМУ замеру каждой точки: перемерили и попали
+        в допуск — красное и крестик снимаются (раньше «плохая» отметка оставалась до конца прогона)."""
         t = self.t_ai if kind == "ai" else self.t_ao
+        n = 8 if kind == "ai" else 2
+        self.pt_bad[kind][(ch, i)] = not good
         vals = list(t.item(f"r{i}", "values")); vals[0] = f"{sp:g}"; vals[1 + ch] = f"{v:.3f}"
-        t.item(f"r{i}", values=vals, tags=("bad",) if (not good or "bad" in t.item(f"r{i}", "tags")) else ())
-        if not good: self.bad[kind][ch] = True
-        if i == len(DEF_SP) - 1:
+        row_bad = any(self.pt_bad[kind].get((c, i)) for c in range(n))
+        t.item(f"r{i}", values=vals, tags=("bad",) if row_bad else ())
+        done = [j for j in range(len(DEF_SP)) if (ch, j) in self.pt_bad[kind]]
+        self.bad[kind][ch] = any(self.pt_bad[kind][(ch, j)] for j in done)
+        if len(done) == len(DEF_SP):
             tv = list(t.item("tol", "values")); tv[1 + ch] = "✖" if self.bad[kind][ch] else "✔"
-            t.item("tol", values=tv, tags=("bad" if self.bad[kind][ch] else "good",))
+            tol_bad = any(x == "✖" for x in tv[1:])
+            t.item("tol", values=tv, tags=("bad" if tol_bad else "good",))
 
     def set_dio(self, mode, n, good, mask):
         iid = "single" if mode == "single" else str(float(mode))
@@ -729,7 +737,7 @@ class App(ManualMixin):
         if not self.t_ci.exists(iid):
             self.t_ci.insert("", "end", iid=iid, values=[f"{f:g}", n, "", "", "", ""])
         vals = list(self.t_ci.item(iid, "values")); vals[2 + ch] = f"{got} {'✔' if good else '✖'}"
-        self.t_ci.item(iid, values=vals, tags=("bad",) if (not good or "bad" in self.t_ci.item(iid, "tags")) else ())
+        self.t_ci.item(iid, values=vals, tags=("bad",) if any(str(x).endswith("✖") for x in vals[2:]) else ())
 
     # ================= порты =================
     NONE = {"board": None, "relay": "— вручную —", "cal": "— вручную —", "scan": "— не используется —",

@@ -314,7 +314,12 @@ class ManualMixin:
         self.mboard(lambda d: d.datetime_read(), done)
 
     def m_dt_write(self):
-        self.mboard(lambda d: d.datetime_write(), lambda r: (self.add_log("Время ПК записано в плату"), self.m_dt_read()))
+        def done(r):
+            ok, _, _ = r
+            self.add_log("Время ПК записано в плату" if ok else
+                         "Часы платы не приняли время (плата ответила «принято», но время не изменилось)", None if ok else "err")
+            self.m_dt_read()
+        self.mboard(lambda d: d.datetime_sync(lambda m: self.ui.log(m, "warn")), done)
 
     # ---------------- Системные настройки ----------------
     def _m_sys(self, tab, f):
@@ -658,10 +663,10 @@ class ManualMixin:
         for i in range(16):
             x = 60 + i * 46
             self.lamps[("di", i)] = cv.create_oval(x, 18, x + 26, 44, fill=LAMP_OFF, outline="#9aa3b1")
-            cv.create_text(x + 13, 54, text=str(i), font=("Segoe UI", 8))
+            cv.create_text(x + 13, 54, text=str(i + 1), font=("Segoe UI", 8))
             o = cv.create_oval(x, 76, x + 26, 102, fill=LAMP_OFF, outline="#9aa3b1")
             self.lamps[("do", i)] = o
-            cv.create_text(x + 13, 112, text=str(i), font=("Segoe UI", 8))
+            cv.create_text(x + 13, 112, text=str(i + 1), font=("Segoe UI", 8))
             cv.tag_bind(o, "<Button-1>", lambda e, i=i: self.m_do_toggle(i))
             cv.tag_bind(o, "<Enter>", lambda e: cv.configure(cursor="hand2"))
             cv.tag_bind(o, "<Leave>", lambda e: cv.configure(cursor=""))
@@ -679,7 +684,7 @@ class ManualMixin:
         self.dio_w = []
         for i in range(16):
             w = dict(di_en=tk.BooleanVar(), di_inv=tk.BooleanVar(), di_t=tk.StringVar(), do_en=tk.BooleanVar(), do_inv=tk.BooleanVar())
-            ttk.Label(g, text=str(i)).grid(row=i + 1, column=0, sticky="w", padx=6)
+            ttk.Label(g, text=str(i + 1)).grid(row=i + 1, column=0, sticky="w", padx=6)
             ttk.Checkbutton(g, variable=w["di_en"]).grid(row=i + 1, column=1, padx=6)
             ttk.Checkbutton(g, variable=w["di_inv"]).grid(row=i + 1, column=2, padx=6)
             ttk.Entry(g, textvariable=w["di_t"], width=6).grid(row=i + 1, column=3, sticky="w", padx=6)

@@ -146,13 +146,21 @@ class Runner:
 
     # ---- шаг 2: время ----
     def step_time(self):
-        self.dev.datetime_write()
-        time.sleep(0.3)
-        y, mo, d, h, mi, s = self.dev.datetime_read()
-        now = time.localtime()
-        dt = abs((time.mktime(now) - time.mktime((y, mo, d, h, mi, s, 0, 0, -1))))
-        self.log(f"Время платы {d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}, расхождение {dt:.0f} с")
-        return dt <= 1.5
+        sync = getattr(self.dev, "datetime_sync", None)
+        if sync is None:                                   # симулятор
+            self.dev.datetime_write(); time.sleep(0.3)
+            (y, mo, d, h, mi, s), dt = self.dev.datetime_read(), 0
+            ok = True
+        else:
+            ok, (y, mo, d, h, mi, s), dt = sync(self.log)
+        self.log(f"Время ПК    {time.strftime('%d.%m.%Y %H:%M:%S')}")
+        self.log(f"Время платы {d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
+                 + (f", расхождение {dt:.0f} с" if dt != float("inf") else ""))
+        if not ok:
+            self.note("часы платы не приняли время ни одним способом (плата отвечает «принято», но время не меняется). "
+                      "Проверьте в конфигураторе «Дата и время → Записать»; если там записывается — снимите это сниффером "
+                      "(mk201_sniffer.py) и пришлите лог")
+        return ok
 
     # ---- шаг 3: серийник и MAC ----
     def step_serial_mac(self):

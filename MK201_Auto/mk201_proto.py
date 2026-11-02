@@ -223,10 +223,57 @@ class MK201:
         h, m, s, y, mo, d = self.read_regs(ADDR_DATETIME_READ, 6)
         return (2000 + (y & 0xFF), mo & 0xFF, d & 0xFF, h & 0xFF, m & 0xFF, s & 0xFF)
 
-    def datetime_write(self, t=None):
+    def datetime_write(self, t=None, order="hms", unblock=False):
+        """Запись времени в 1042 ×6. order: «hms» — час, мин, сек, год, мес, день (как чтение 1036);
+        «ymd» — год, мес, день, час, мин, сек. unblock — сначала ключ разблокировки (как у серийника и MAC)."""
         t = t or time.localtime()
-        self.write_regs(ADDR_DATETIME_SET, [t.tm_hour, t.tm_min, t.tm_sec,
-                                            t.tm_year - 2000, t.tm_mon, t.tm_mday])
+        hms, ymd = [t.tm_hour, t.tm_min, t.tm_sec], [t.tm_year - 2000, t.tm_mon, t.tm_mday]
+        if unblock:
+            self.unblock()
+        self.write_regs(ADDR_DATETIME_SET, hms + ymd if order == "hms" else ymd + hms)
+
+    # 02.11.2026: плата ответила «запись принята», а часы остались 01.01.2000 — запись молча отброшена.
+    # Пробуем варианты по очереди и проверяем чтением; сработавший запоминаем до конца работы программы.
+    DT_METHODS = (("hms", False), ("hms", True), ("ymd", False), ("ymd", True))
+    dt_method = None
+
+    def datetime_diff(self):
+        """(время платы, расхождение с ПК в секундах)."""
+        y, mo, d, h, mi, s = self.datetime_read()
+        try:
+            board = time.mktime((y, mo, d, h, mi, s, 0, 0, -1))
+        except (OverflowError, ValueError):
+            return (y, mo, d, h, mi, s), float("inf")
+        return (y, mo, d, h, mi, s), abs(time.time() - board)
+
+    def datetime_sync(self, log=print, tol=2.0, settle=1.0):
+        """Записать время ПК и убедиться чтением, что часы платы его приняли. -> (ok, время платы, расхождение)."""
+        methods = list(self.DT_METHODS)
+        if MK201.dt_method in methods:
+            methods.remove(MK201.dt_method); methods.insert(0, MK201.dt_method)
+        names = {"hms": "час-мин-сек-год-мес-день", "ymd": "год-мес-день-час-мин-сек"}
+        board, diff = None, float("inf")
+        for n, (order, unb) in enumerate(methods):
+            if n:
+                log(f"Время не встало — пробую запись: порядок {names[order]}" + (", с ключом разблокировки" if unb else ""))
+            try:
+                self.datetime_write(order=order, unblock=unb)
+            except ModbusError as e:
+                log(f"  плата отказала: {e}")
+                continue
+            time.sleep(settle)
+            board, diff = self.datetime_diff()
+            if diff <= tol:
+                if MK201.dt_method != (order, unb) and n:
+                    log(f"Время записалось так: порядок {names[order]}" + (", с ключом разблокировки" if unb else "")
+                        + " — дальше пишу так же")
+                MK201.dt_method = (order, unb)
+                return True, board, diff
+            try:
+                log(f"  в регистрах записи 1042 ×6 сейчас: {self.read_regs(ADDR_DATETIME_SET, 6)}")
+            except Exception:
+                pass
+        return False, board, diff
 
     # ---- заводские данные ----
     def unblock(self):
