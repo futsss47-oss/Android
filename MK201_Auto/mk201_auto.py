@@ -44,7 +44,7 @@ APPDIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 CFG = os.path.join(APPDIR, "mk201_auto.json")
 LOGDIR = os.path.join(APPDIR, "logs")
 TRACE = os.path.join(LOGDIR, time.strftime("mk201_%Y-%m-%d_%H%M%S.log"))     # свой файл на каждый запуск программы
-VERSION = "02.11.2026 · второй АКИП-1168 (DPS3…), выбранный прибор используется всегда"
+VERSION = "02.11.2026-2 · одна страница результатов, проверенная запись времени, DI/DO с 1"
 LOCKFILE = os.path.join(APPDIR, "mk201_fw_lock.json")   # есть файл = плата после загрузки ПО не подтвердила запуск
 STEPS = [("power", "Ток и мощность потребления (CH1)"),
          ("ports", "Порты 1–3 (MbSlave, Master 0–2)"), ("time", "Дата и время с ПК"),
@@ -58,9 +58,11 @@ STEP_DEFAULT_OFF = {"ci", "eth", "rs485"}
 DEF_SP = ["0", "4", "8", "12", "16", "20"]
 IFACES = Protocol.IFACES
 
-# ---- палитра как в МИБ252 ----
+# ---- палитра как в МИБ252 (02.11.2026: тёмная шапка, карточки, цветные СТАРТ/Стоп) ----
 C_BG, C_PANEL, C_TEXT, C_MUTED = "#f4f6f9", "#ffffff", "#1f2328", "#6b7280"
 C_ACCENT, C_ACCENT_DARK, C_LINE = "#2563eb", "#1d4ed8", "#d0d7de"
+C_HEAD, C_HEAD_2, C_HEAD_TEXT, C_HEAD_MUTED = "#1e293b", "#273449", "#ffffff", "#a8b3c7"
+C_GO, C_GO_DARK = "#16a34a", "#15803d"
 OK, ERR, WARN = "#16a34a", "#dc2626", "#d97706"
 FONT, FONT_B, FONT_S = ("Segoe UI", 10), ("Segoe UI", 10, "bold"), ("Segoe UI", 9)
 MONO = ("Consolas", 10)
@@ -93,16 +95,26 @@ def apply_theme(root):
     st.configure("Muted.TLabel", foreground=C_MUTED)
     st.configure("Note.TLabel", foreground=C_MUTED, font=("Segoe UI", 8))
     st.configure("Big.TLabel", font=("Segoe UI", 13, "bold"), foreground=C_ACCENT_DARK)
-    st.configure("TLabelframe", background=C_BG, bordercolor=C_LINE, relief="solid")
-    st.configure("TLabelframe.Label", background=C_BG, foreground=C_ACCENT_DARK, font=FONT_B)
-    st.configure("TNotebook", background=C_BG, borderwidth=0)
-    st.configure("TNotebook.Tab", padding=(14, 6), background="#e7ebf0", foreground=C_TEXT)
-    st.map("TNotebook.Tab", background=[("selected", C_PANEL)], foreground=[("selected", C_ACCENT_DARK)])
+    st.configure("TLabelframe", background=C_BG, bordercolor="#c5cfdc", relief="solid", borderwidth=1)
+    st.configure("TLabelframe.Label", background=C_BG, foreground=C_ACCENT_DARK, font=("Segoe UI", 10, "bold"))
+    st.configure("TNotebook", background=C_BG, borderwidth=0, tabmargins=(6, 4, 6, 0))
+    st.configure("TNotebook.Tab", padding=(18, 7), background="#e2e7ef", foreground="#374151", font=FONT_B,
+                 bordercolor=C_LINE)
+    st.map("TNotebook.Tab", background=[("selected", C_ACCENT), ("active", "#d5deec")],
+           foreground=[("selected", "#ffffff")], expand=[("selected", (1, 1, 1, 0))])
     st.configure("TButton", padding=(10, 4), background=C_PANEL)
     st.map("TButton", background=[("active", "#eaf1ff"), ("disabled", "#eef0f3")], foreground=[("disabled", "#a5acb8")])
     st.configure("Accent.TButton", background=C_ACCENT, foreground="#ffffff", font=("Segoe UI", 11, "bold"), padding=(18, 8))
     st.map("Accent.TButton", background=[("active", C_ACCENT_DARK), ("disabled", "#9db7f0")], foreground=[("disabled", "white")])
-    st.configure("Stop.TButton", foreground=ERR, font=FONT_B)
+    st.configure("Start.TButton", background=C_GO, foreground="#ffffff", font=("Segoe UI", 12, "bold"), padding=(26, 9))
+    st.map("Start.TButton", background=[("active", C_GO_DARK), ("disabled", "#a7d8b8")], foreground=[("disabled", "white")])
+    st.configure("Stop.TButton", background=ERR, foreground="#ffffff", font=FONT_B, padding=(14, 4))
+    st.map("Stop.TButton", background=[("active", "#b91c1c"), ("disabled", "#4b5a72")],
+           foreground=[("disabled", "#8f9bb0")])
+    st.configure("Head.TButton", background=C_HEAD_2, foreground=C_HEAD_TEXT, bordercolor="#3b4a63", padding=(12, 4))
+    st.map("Head.TButton", background=[("active", "#34445e")])
+    st.configure("Head.Horizontal.TProgressbar", background="#3b82f6", troughcolor=C_HEAD_2, bordercolor=C_HEAD_2,
+                 lightcolor="#3b82f6", darkcolor="#3b82f6", thickness=10)
     st.configure("TCheckbutton", background=C_BG)
     st.map("TCheckbutton", background=[("active", C_BG)])
     st.configure("TRadiobutton", background=C_BG)
@@ -111,7 +123,10 @@ def apply_theme(root):
     st.map("TCombobox", fieldbackground=[("readonly", C_PANEL)])
     st.configure("TSpinbox", fieldbackground=C_PANEL)
     st.configure("Treeview", background=C_PANEL, fieldbackground=C_PANEL, rowheight=24)
-    st.configure("Treeview.Heading", background="#e7ebf0", font=("Segoe UI", 9, "bold"))
+    st.configure("Compact.Treeview", background=C_PANEL, fieldbackground=C_PANEL, rowheight=20, font=FONT_S)
+    st.configure("Treeview.Heading", background="#dbe4f3", foreground="#1e3a8a", font=("Segoe UI", 9, "bold"),
+                 bordercolor="#c5cfdc")
+    st.map("Treeview.Heading", background=[("active", "#cbd8ee")])
     st.map("Treeview", background=[("selected", "#dce8fb")], foreground=[("selected", C_TEXT)])
     st.configure("Horizontal.TProgressbar", background=C_ACCENT, thickness=12)
 
@@ -327,17 +342,20 @@ class App(ManualMixin):
     def build(self):
         r = self.root
         # --- верхняя полоса: всегда видна ---
-        top = ttk.Frame(r, padding=(10, 8, 10, 4)); top.pack(fill="x")
-        self.chip = ttk.Label(top, text="● Готов к работе", style="Big.TLabel"); self.chip.pack(side="left")
+        top = tk.Frame(r, bg=C_HEAD, padx=12, pady=8); top.pack(fill="x")
+        tk.Label(top, text="MK201 Auto", bg=C_HEAD, fg=C_HEAD_TEXT, font=("Segoe UI", 14, "bold")).pack(side="left")
+        tk.Frame(top, bg=C_HEAD, width=14).pack(side="left")
+        self.chip = tk.Label(top, text="Готов к работе", bg=C_ACCENT, fg="#ffffff", font=("Segoe UI", 10, "bold"), padx=12, pady=3)
+        self.chip.pack(side="left")
         self.stop_btn = ttk.Button(top, text="■ Стоп", style="Stop.TButton", command=self.stop, state="disabled")
         self.stop_btn.pack(side="right")
-        ttk.Button(top, text="⚙ Настройки…", command=self.open_settings).pack(side="right", padx=(0, 8))
-        self.timer = ttk.Label(top, text="", font=("Segoe UI", 14, "bold")); self.timer.pack(side="right", padx=10)
-        self.bar = ttk.Progressbar(top, length=220, maximum=100); self.bar.pack(side="right", padx=8)
-        self.status = ttk.Label(top, text="Ожидание запуска", style="Muted.TLabel"); self.status.pack(side="right", padx=8)
-        line2 = ttk.Frame(r, padding=(10, 0, 10, 4)); line2.pack(fill="x")
-        self.detail_lbl = ttk.Label(line2, text="", foreground=C_ACCENT_DARK, font=FONT_B); self.detail_lbl.pack(anchor="w")
-        self.last_lbl = ttk.Label(line2, text="", style="Muted.TLabel"); self.last_lbl.pack(anchor="w")
+        ttk.Button(top, text="⚙ Настройки…", style="Head.TButton", command=self.open_settings).pack(side="right", padx=(0, 8))
+        self.timer = tk.Label(top, text="", bg=C_HEAD, fg="#fbbf24", font=("Consolas", 15, "bold")); self.timer.pack(side="right", padx=10)
+        self.bar = ttk.Progressbar(top, length=200, maximum=100, style="Head.Horizontal.TProgressbar"); self.bar.pack(side="right", padx=8)
+        self.status = tk.Label(top, text="Ожидание запуска", bg=C_HEAD, fg=C_HEAD_MUTED, font=FONT, anchor="e"); self.status.pack(side="right", padx=8, fill="x", expand=True)
+        line2 = tk.Frame(r, bg=C_PANEL, padx=12, pady=5, highlightbackground=C_LINE, highlightthickness=1); line2.pack(fill="x")
+        self.detail_lbl = tk.Label(line2, text="", bg=C_PANEL, fg=C_ACCENT_DARK, font=FONT_B, anchor="w"); self.detail_lbl.pack(fill="x")
+        self.last_lbl = tk.Label(line2, text="", bg=C_PANEL, fg=C_MUTED, font=FONT_S, anchor="w"); self.last_lbl.pack(fill="x")
         self.lock_bar = tk.Frame(r, bg="#fdecea", highlightbackground="#f5b5ae", highlightthickness=1)
         tk.Label(self.lock_bar, text="⛔  Плата после загрузки ПО ещё не подтвердила запуск основной программы.\n"
                  "Все действия с платой заблокированы. Питание не отключать!", bg="#fdecea", fg=ERR,
@@ -347,7 +365,7 @@ class App(ManualMixin):
         ttk.Button(self.lock_bar, text="Проверить плату", command=self.check_board).pack(side="right", padx=4)
         self.lock_anchor = line2
 
-        nb = ttk.Notebook(r); nb.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+        nb = ttk.Notebook(r); nb.pack(fill="both", expand=True, padx=6, pady=(6, 6))
         self.nb = nb
         self.tabs = {}
         for key, title, builder, scroll in (("conn", "Подключение", self._tab_connect, True),
@@ -534,7 +552,7 @@ class App(ManualMixin):
         # кнопки внизу — видны всегда, остальное колонки прокручивается колесом
         btns = ttk.Frame(left); btns.pack(side="bottom", fill="x", pady=(6, 0))
         b1 = ttk.Frame(btns); b1.pack(fill="x")
-        self.btn_start = ttk.Button(b1, text="СТАРТ", style="Accent.TButton", command=self.start); self.btn_start.pack(side="left")
+        self.btn_start = ttk.Button(b1, text="▶  СТАРТ", style="Start.TButton", command=self.start); self.btn_start.pack(side="left")
         self.btn_retry = ttk.Button(b1, text="Повторить непройденные", command=self.retry_failed)
         self.btn_retry.pack(side="left", padx=6)
         b2 = ttk.Frame(btns); b2.pack(fill="x", pady=(4, 0))
@@ -577,43 +595,38 @@ class App(ManualMixin):
             ttk.Combobox(lf, textvariable=self.iface[n], values=["годен", "не годен"], width=9,
                          state="readonly").grid(row=i // 2, column=(i % 2) * 2 + 1, sticky="w", padx=(0, 10), pady=1)
 
-        rn = ttk.Notebook(right); rn.pack(fill="both", expand=True)
-        p = ttk.Frame(rn, padding=8); rn.add(p, text="AI / AO")
-        self.t_ai = self.table(p, "Аналоговые входы, измерено мА", [f"AI{i}" for i in range(8)], 8)
-        self.t_ao = self.table(p, "Аналоговые выходы, измерено мА", ["AO0", "AO1"], 2)
-        p = ttk.Frame(rn, padding=8); rn.add(p, text="DO → DI")
-        self.t_dio = ttk.Treeview(p, columns=["m"] + [str(i) for i in range(16)], show="headings", height=4, selectmode="none")
-        self.t_dio.heading("m", text=""); self.t_dio.column("m", width=130, anchor="w")
-        for i in range(16):
-            self.t_dio.heading(str(i), text=str(i + 1)); self.t_dio.column(str(i), width=34, anchor="center")
-        self.t_dio.tag_configure("bad", foreground=ERR)
-        self.t_dio.pack(fill="x")
-        p = ttk.Frame(rn, padding=8); rn.add(p, text="Счётные входы")
-        self.t_ci = ttk.Treeview(p, columns=["f", "n", "0", "1", "2", "3"], show="headings", height=4, selectmode="none")
-        for k, t, w in (("f", "Гц", 70), ("n", "подано", 80), ("0", "CI1", 90), ("1", "CI2", 90), ("2", "CI3", 90), ("3", "CI4", 90)):
-            self.t_ci.heading(k, text=t); self.t_ci.column(k, width=w, anchor="center")
-        self.t_ci.tag_configure("bad", foreground=ERR)
-        self.t_ci.pack(fill="x")
+        # 02.11.2026: результаты — на одной странице, без вкладок (AI/AO, DO → DI, CI видны сразу)
+        pg = self._scrollable(right)
+        self.t_an = self.section(pg, "Аналоговые входы и выходы, измерено мА",
+                                 ["ch"] + [str(i) for i in range(len(DEF_SP))] + ["tol"], 10,
+                                 [("ch", "Канал", 58)] + [(str(i), f"{v} мА", 64) for i, v in enumerate(DEF_SP)] + [("tol", "допуск", 56)])
+        self.t_dio = self.section(pg, "DO → DI (каналы 1–16)", ["m"] + [str(i) for i in range(16)], 4,
+                                  [("m", "", 104)] + [(str(i), str(i + 1), 24) for i in range(16)])
+        self.t_ci = self.section(pg, "Счётные входы CI", ["f", "n", "0", "1", "2", "3"], 3,
+                                 [("f", "Гц", 64), ("n", "подано", 76)] + [(str(i), f"CI{i + 1}", 84) for i in range(4)])
         self.reset_tables()
 
-    def table(self, parent, title, cols, n):
-        fr = ttk.Frame(parent); fr.pack(side="left", padx=(0, 14), anchor="n")
-        ttk.Label(fr, text=title, font=FONT_B).pack(anchor="w", pady=(0, 3))
-        t = ttk.Treeview(fr, columns=["sp"] + list(range(n)), show="headings", height=7, selectmode="none")
-        t.heading("sp", text="мА"); t.column("sp", width=50, anchor="center")
-        for i, c in enumerate(cols):
-            t.heading(i, text=c); t.column(i, width=62 if n > 2 else 80, anchor="center")
-        t.tag_configure("bad", foreground=ERR); t.tag_configure("good", foreground=OK)
-        t.pack()
+    def section(self, parent, title, cols, height, heads):
+        """Карточка с заголовком и компактной таблицей результатов."""
+        lf = ttk.LabelFrame(parent, text=title, padding=(6, 2, 6, 4)); lf.pack(fill="x", pady=(0, 4), padx=(0, 4))
+        t = ttk.Treeview(lf, columns=cols, show="headings", height=height, selectmode="none", style="Compact.Treeview")
+        for k, text, w in heads:
+            t.heading(k, text=text); t.column(k, width=w, minwidth=w, anchor="w" if k in ("ch", "m") else "center", stretch=False)
+        t.tag_configure("bad", foreground=ERR, background="#fdecea"); t.tag_configure("good", foreground=OK)
+        t.tag_configure("ao", background="#f3f6fb")
+        t.pack(anchor="w")
         return t
 
     def reset_tables(self):
         self.bad = {"ai": [False] * 8, "ao": [False] * 2}
         self.pt_bad = {"ai": {}, "ao": {}}          # (канал, точка) -> вне допуска по последнему замеру
-        for t, n in ((self.t_ai, 8), (self.t_ao, 2)):
-            for iid in t.get_children(): t.delete(iid)
-            for i, s in enumerate(DEF_SP): t.insert("", "end", iid=f"r{i}", values=[s] + [""] * n)
-            t.insert("", "end", iid="tol", values=["допуск"] + [""] * n)
+        t = self.t_an
+        for iid in t.get_children(): t.delete(iid)
+        for i, v in enumerate(DEF_SP): t.heading(str(i), text=f"{v} мА")
+        for kind, n in (("ai", 8), ("ao", 2)):
+            for ch in range(n):
+                t.insert("", "end", iid=f"{kind}{ch}", values=[f"{kind.upper()}{ch}"] + [""] * (len(DEF_SP) + 1),
+                         tags=("ao",) if kind == "ao" else ())
         for iid in self.t_dio.get_children(): self.t_dio.delete(iid)
         S = self.S
         for iid, t in (("single", f"{S['dio_v_work']:g} В по одному"), (str(float(S["dio_v_hi"])), f"{S['dio_v_hi']:g} В, все DO"),
@@ -674,7 +687,7 @@ class App(ManualMixin):
     def clear_log(self):
         self.logw.configure(state="normal"); self.logw.delete("1.0", "end"); self.logw.configure(state="disabled")
 
-    def set_chip(self, text, color): self.chip.configure(text="● " + text, foreground=color)
+    def set_chip(self, text, color): self.chip.configure(text=text, bg=color)
     def set_dot(self, name, st, text=None):
         default = {"ok": "на связи", "err": "нет ответа", "man": "вручную", "off": "не проверено", "none": "не используется"}
         color = {"ok": OK, "err": ERR, "man": WARN, "off": "#9aa3b1", "none": "#9aa3b1"}[st]
@@ -703,20 +716,23 @@ class App(ManualMixin):
         self.btn_skip.configure(state="normal" if (sec is not None and self.phase_text == "Прогрев") else "disabled")
 
     def set_point(self, kind, ch, i, sp, v, good):
-        """Точка AI/AO. Оценка ✔/✖ пересчитывается по ПОСЛЕДНЕМУ замеру каждой точки: перемерили и попали
-        в допуск — красное и крестик снимаются (раньше «плохая» отметка оставалась до конца прогона)."""
-        t = self.t_ai if kind == "ai" else self.t_ao
-        n = 8 if kind == "ai" else 2
+        """Точка AI/AO: строка — канал, столбец — точка. ✔/✖ и красная строка — по ПОСЛЕДНЕМУ замеру каждой
+        точки: перемерили и попали в допуск — красное и крестик снимаются."""
+        t, iid = self.t_an, f"{kind}{ch}"
         self.pt_bad[kind][(ch, i)] = not good
-        vals = list(t.item(f"r{i}", "values")); vals[0] = f"{sp:g}"; vals[1 + ch] = f"{v:.3f}"
-        row_bad = any(self.pt_bad[kind].get((c, i)) for c in range(n))
-        t.item(f"r{i}", values=vals, tags=("bad",) if row_bad else ())
+        head = t.heading(str(i), "text")
+        if kind == "ai" and head != f"{sp:g} мА":
+            t.heading(str(i), text=f"{sp:g} мА"); head = f"{sp:g} мА"
+        vals = list(t.item(iid, "values"))
+        vals[1 + i] = f"{v:.3f}" + ("" if head == f"{sp:g} мА" else f" ({sp:g})") + ("" if good else " ✖")
         done = [j for j in range(len(DEF_SP)) if (ch, j) in self.pt_bad[kind]]
         self.bad[kind][ch] = any(self.pt_bad[kind][(ch, j)] for j in done)
         if len(done) == len(DEF_SP):
-            tv = list(t.item("tol", "values")); tv[1 + ch] = "✖" if self.bad[kind][ch] else "✔"
-            tol_bad = any(x == "✖" for x in tv[1:])
-            t.item("tol", values=tv, tags=("bad" if tol_bad else "good",))
+            vals[-1] = "✖" if self.bad[kind][ch] else "✔"
+        tags = ["ao"] if kind == "ao" else []
+        if self.bad[kind][ch]: tags = ["bad"]
+        elif len(done) == len(DEF_SP): tags.append("good")
+        t.item(iid, values=vals, tags=tuple(tags))
 
     def set_dio(self, mode, n, good, mask):
         iid = "single" if mode == "single" else str(float(mode))
