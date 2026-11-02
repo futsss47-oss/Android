@@ -459,10 +459,10 @@ class App(ManualMixin):
         ttk.Label(lf, text="Скорость:", style="Muted.TLabel").grid(row=0, column=3, sticky="e", padx=(10, 4))
         ttk.Entry(lf, textvariable=self.v["baud"], width=8).grid(row=0, column=4, sticky="w")
         row = ttk.Frame(lf); row.grid(row=len(self.dev_rows), column=0, columnspan=5, sticky="w", pady=(8, 0))
-        ttk.Button(row, text="⟳ Обновить список", command=self.refresh_ports).pack(side="left", padx=(0, 6))
+        self.btn_refresh = ttk.Button(row, text="⟳ Обновить список", command=self.refresh_ports); self.btn_refresh.pack(side="left", padx=(0, 6))
         self.btn_auto = ttk.Button(row, text="Автопоиск и подключение", command=self.autodetect); self.btn_auto.pack(side="left", padx=(0, 6))
         self.btn_conn = ttk.Button(row, text="Подключить", style="Accent.TButton", command=self.connect); self.btn_conn.pack(side="left", padx=(0, 6))
-        ttk.Button(row, text="Отключить", command=self.disconnect).pack(side="left", padx=(0, 14))
+        self.btn_disc = ttk.Button(row, text="Отключить", command=self.disconnect); self.btn_disc.pack(side="left", padx=(0, 14))
         ttk.Checkbutton(row, text="Симулятор (без железа)", variable=self.sim).pack(side="left")
         row2 = ttk.Frame(lf); row2.grid(row=len(self.dev_rows) + 1, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(row2, text="Питание платы (CH1):").pack(side="left", padx=(0, 6))
@@ -852,8 +852,22 @@ class App(ManualMixin):
         self.connecting = True; self.apply_lock()
         threading.Thread(target=self._connect, kwargs=dict(auto=True), daemon=True).start()
 
+    def com_conflict(self):
+        """Один COM-порт выбран для двух приборов (номера COM поменялись) -> текст ошибки или ''."""
+        seen = {}
+        for name, label, key, kind in self.dev_rows:
+            p = self.port(key) if kind == "com" else ""
+            if p:
+                if p.upper() in seen:
+                    return f"Порт {p} выбран и для «{seen[p.upper()]}», и для «{label}». Выберите разные порты."
+                seen[p.upper()] = label
+        return ""
+
     def connect(self):
         if self.locked or self.running or self.flashing or self.connecting: return
+        err = self.com_conflict()
+        if err:
+            messagebox.showwarning("Подключение", err); return
         self.save()
         self.manual_close()
         self.connecting = True; self.apply_lock()
@@ -1111,7 +1125,7 @@ class App(ManualMixin):
             for b in (self.btn_start, self.btn_conn, self.btn_flash, self.btn_retry): b.config(state="disabled")
         else:
             self.lock_bar.pack_forget()
-            for b in (self.btn_conn, self.btn_start, self.btn_flash, self.btn_retry, self.btn_auto):
+            for b in (self.btn_conn, self.btn_start, self.btn_flash, self.btn_retry, self.btn_auto, self.btn_refresh, self.btn_disc):
                 b.config(state="disabled" if busy else "normal")
         self.manual_enable(not (self.locked or busy))
 
@@ -1235,7 +1249,7 @@ class App(ManualMixin):
         self.psu = self.gen = None
 
     def disconnect(self):
-        if self.running: return
+        if self.running or self.connecting or self.flashing: return
         self.manual_close(); self.close_extra()
         for n, _, _, _ in self.dev_rows: self.set_dot(n, "off")
         self.set_power_lbl()
@@ -1409,6 +1423,9 @@ class App(ManualMixin):
                         ui.log(f"Блок питания: не удалось включить CH1 ({e}) — питание платы проверьте вручную", "warn")
                 # 29.10.2026: плата подключается первой и сама по себе — остальные приборы её не блокируют
                 bp = self.port("port")
+                err = self.com_conflict()
+                if err:
+                    raise RuntimeError(err + " (вкладка «Подключение»)")
                 if not bp:
                     raise RuntimeError("Не выбран порт платы — выберите его на вкладке «Подключение»")
                 ui.log(f"Подключаюсь к плате {bp}…")

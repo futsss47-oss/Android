@@ -67,8 +67,8 @@ class ManualMixin:
 
     def mboard(self, fn, done=None, quiet=False):
         """Выполнить fn(плата) в фоне; done(результат) — в окне."""
-        if self.running or self.flashing:
-            if not quiet: self.add_log("Идёт прогон или запись ПО — ручной режим недоступен", "warn")
+        if self.running or self.flashing or self.connecting:
+            if not quiet: self.add_log("Идёт прогон, подключение или запись ПО — ручной режим недоступен", "warn")
             return
         if self.locked:
             if not quiet: self.add_log("Плата заблокирована после загрузки ПО — сначала «Проверить плату»", "warn")
@@ -77,6 +77,9 @@ class ManualMixin:
             return
         def job():
             with self.mlock:
+                # 02.11.2026: пока поток ждал mlock, мог начаться прогон/подключение — тогда порт платы не открываем
+                if self.running or self.flashing or self.connecting:
+                    return
                 self._mbusy = True
                 try:
                     if self.mdev is None:
@@ -117,8 +120,8 @@ class ManualMixin:
         if dev is None:
             messagebox.showinfo("Приборы", "Прибор не подключён. Выберите его на вкладке «Подключение» и нажмите «Подключить».")
             return
-        if self.running:
-            self.add_log("Идёт прогон — приборами управляет сценарий", "warn"); return
+        if self.running or self.connecting:
+            self.add_log("Идёт прогон или подключение — подождите", "warn"); return
         def job():
             with self.ilock:
                 try:
@@ -131,7 +134,7 @@ class ManualMixin:
     def poll(self):
         """Автообновление видимой вкладки ручного режима раз в секунду."""
         try:
-            if self.nb.select() == str(self.tabs["manual"]) and not (self.running or self.flashing or self.locked):
+            if self.nb.select() == str(self.tabs["manual"]) and not (self.running or self.flashing or self.locked or self.connecting):
                 cur = self.mnb.select()
                 for key, (frame, fn) in self.mpoll.items():
                     if cur == str(frame) and self.auto.get(key) and self.auto[key].get():

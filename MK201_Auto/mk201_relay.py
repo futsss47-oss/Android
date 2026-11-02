@@ -49,7 +49,7 @@ class Relay:
         """Порт «пропал» (USB-переподключение ESP32, ошибка WriteFile / Отказано в доступе):
         закрыть и открыть заново, пока Windows не вернёт порт (до wait секунд)."""
         t0, last = time.time(), None
-        while time.time() - t0 < wait:
+        while self.alive and time.time() - t0 < wait:
             try:
                 self._open()
                 self.log(f"Блок реле: связь по {self.port} восстановлена")
@@ -62,6 +62,8 @@ class Relay:
 
     def _raw(self, line):
         with self.lock:
+            if not self.alive:
+                raise RuntimeError(f"Блок реле {self.port} отключён программой")
             try:
                 return self._io(line)
             except (serial.SerialException, OSError) as e:
