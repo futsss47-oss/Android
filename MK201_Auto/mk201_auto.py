@@ -504,7 +504,7 @@ class App(ManualMixin):
                          ("relay", "Блок реле (ESP32)", "relay_port", "com"),
                          ("cal", "Калибратор Yokogawa CA71", "cal_port", "com"),
                          ("scan", "Сканер штрихкодов", "scan_port", "com"),
-                         ("rs485", "Переходник USB-RS485", "rs485_port", "com"),
+                         ("rs485", "Переходник RS-485 (MOXA, Modbus RTU)", "rs485_port", "com"),
                          ("psu", "Блок питания АКИП-1168 (CH1 плата, CH2 DO/DI)", "psu_res", "visa"),
                          ("gen", "Генератор АКИП-3409/2 (→ CI)", "gen_res", "visa")]
         self.combo, self.st = {}, {}
@@ -587,7 +587,7 @@ class App(ManualMixin):
         cell(2, 3, "порт", "tcp_port", 6)
         cell(2, 5, "адрес", "tcp_unit", 3)
         ttk.Button(lf, text="Проверить связь", command=lambda: self.test_link("Modbus TCP")).grid(row=2, column=9, padx=(14, 0))
-        ttk.Label(lf, text="RTU — через «Переходник USB-RS485» (выбирается выше). Шаги «Ethernet» и «RS-485 1–3» (после счётных входов): программа отключается от Service Port, "
+        ttk.Label(lf, text="RTU — через COM-порт переходника RS-485 (MOXA), он выбирается в строке «Переходник RS-485» выше. Шаги «Ethernet» и «RS-485 1–3» (после счётных входов): программа отключается от Service Port, "
                            "по TCP и по RTU на каждой клемме читает серийный номер, MAC, дату и время и сверяет с Service Port. "
                            "Сеть ПК должна быть в подсети платы (например, IP ПК 10.155.26.100, маска 255.255.255.0).",
                   style="Note.TLabel", wraplength=900, justify="left").grid(row=3, column=0, columnspan=12, sticky="w", pady=(6, 0))
@@ -606,7 +606,7 @@ class App(ManualMixin):
         if mode == "Modbus RTU":
             p = self.port("rs485_port")
             if not p:
-                raise RuntimeError("Не выбран «Переходник USB-RS485» на вкладке «Подключение»")
+                raise RuntimeError("Не выбран «Переходник RS-485» на вкладке «Подключение»")
             kw = dict(port=p, baud=int(self.v["rtu_baud"].get() or 19200), unit=int(self.v["rtu_unit"].get() or 1),
                       parity=(self.v["rtu_parity"].get() or "N")[:1], stopbits=int(self.v["rtu_stop"].get() or 1))
             return kw, f"Modbus RTU {p}, {kw['baud']} бод, 8{kw['parity']}{kw['stopbits']}, адрес {kw['unit']}"
@@ -1235,7 +1235,11 @@ class App(ManualMixin):
                     miss = []
                     for name, label, key, kind in self.dev_rows:
                         fk = "scanner" if name == "scan" else name
-                        if kind != "com" or name == "rs485":
+                        if kind != "com":
+                            continue
+                        if name == "rs485":          # переходник MOXA: подставляем, только если он ещё не выбран
+                            if found.get("rs485") and not self.port("rs485_port"):
+                                self.v[key].set(lst.get(found["rs485"], found["rs485"]))
                             continue
                         if found.get(fk):
                             self.v[key].set(lst.get(found[fk], found[fk]))
@@ -1337,7 +1341,44 @@ class App(ManualMixin):
 
     def _board(self):
         kw, _ = self.board_link()
-        return MK201(trace=self.trace, **kw)
+        try:
+            return MK201(trace=self.trace, **kw)
+        except Exception:
+            # Service Port новой платы — другой COM: старого порта уже нет. Ищем плату и пробуем ещё раз.
+            if self.v["conn_mode"].get() != "Service Port" or not self.ensure_board_port():
+                raise
+            kw, _ = self.board_link()
+            return MK201(trace=self.trace, **kw)
+
+    def ensure_board_port(self, check=False):
+        """Найти Service Port платы, если выбранного порта нет или (check=True) плата на нём не отвечает.
+        Найденный порт ставится в список «Плата MK201». Вызывать из фонового потока. -> порт или None."""
+        if self.sim.get() or self.v["conn_mode"].get() != "Service Port":
+            return self.port("port") or None
+        cur = self.port("port")
+        have = {p for p, _ in ports.list_ports()}
+        baud = int(self.v["baud"].get() or 115200)
+        if cur in have and (not check or ports.probe_board(cur, baud)):
+            return cur
+        log = self.ui.log
+        log(f"Плата: {'порта ' + cur + ' нет' if cur and cur not in have else (cur or 'порт не выбран') + ' — плата не отвечает'}"
+            " — ищу Service Port новой платы…", "warn")
+        exclude = {self.port(k) for k in ("relay_port", "cal_port", "scan_port", "rs485_port")}
+        for o in (self.relay, self.cal):                 # открытые нами порты не трогаем
+            exclude.add(getattr(o, "port", "") or "")
+        found = ports.find_board(exclude=exclude - {""}, prefer=cur if cur in have else "",
+                                 log=lambda t: log(t, "dim"), baud=baud)
+        if not found:
+            log("Плата не найдена ни на одном COM-порту — проверьте USB-кабель Service Port и питание платы", "err")
+            return None
+        disp = dict(ports.list_ports()).get(found, found)
+        done = threading.Event()
+        def apply():
+            self.refresh_ports(visa=False); self.v["port"].set(disp); self.save(); done.set()
+        self.root.after(0, apply); done.wait(3)
+        log(f"Плата найдена: {found}" + (f" (был {cur})" if cur and cur != found else ""), "ok")
+        self.root.after(0, self.set_dot, "board", "ok", f"на связи ({found})")
+        return found
 
     def check_board(self):
         self.manual_close()
@@ -1656,6 +1697,7 @@ class App(ManualMixin):
                 err = self.com_conflict()
                 if err:
                     raise RuntimeError(err + " (вкладка «Подключение»)")
+                self.ensure_board_port(check=True)          # новая плата — новый COM Service Port
                 try:
                     _, bp = self.board_link()
                 except Exception as e:

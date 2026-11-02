@@ -710,7 +710,7 @@ class Runner:
     def step_rs485(self, proto):
         port = str(self.cfg.get("rs485_port") or "")
         if not port and not self.cfg.get("sim"):
-            self.log("RS-485: переходник USB-RS485 не выбран на вкладке «Подключение» — состояние портов берётся "
+            self.log("RS-485: переходник RS-485 (MOXA) не выбран на вкладке «Подключение» — состояние портов берётся "
                      "из ручного выбора (табл. 7)")
             if proto:
                 for p in range(3):
@@ -741,8 +741,8 @@ class Runner:
                     alt = (BAUDS.get(q[3], baud), {0: "N", 1: "O", 2: "E"}.get(q[4], "N"), {0: 1, 2: 2}.get(q[5], 1), q[0] & 255 or unit)
                     if alt == (baud, parity, stop, unit):
                         alt = None
-                self.need((f"Подключите переходник USB-RS485 к клемме RS-485 {p + 1}" if p == 0 else
-                           f"Переключите переходник USB-RS485 на клемму RS-485 {p + 1}") + f"\n({self.RS485_PINS[p]}).")
+                self.need((f"Подключите переходник RS-485 к клемме RS-485 {p + 1}" if p == 0 else
+                           f"Переключите переходник RS-485 на клемму RS-485 {p + 1}") + f"\n({self.RS485_PINS[p]}).")
                 self.detail(f"{name}: {port}, {baud} бод, 8{parity}{stop}, адрес {unit}")
 
                 def open_dev(alt=alt):

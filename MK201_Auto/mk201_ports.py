@@ -46,6 +46,27 @@ def probe_board(port, baud=115200):
     return False
 
 
+FTDI_VID = 0x0403                                 # Service Port платы — FT232 (USB-COM)
+MOXA_VID = 0x110A                                 # переходники MOXA UPort (RS-485) — плату на них не ищем
+
+
+def find_board(exclude=(), prefer="", log=lambda s: None, baud=115200):
+    """02.11.2026: у каждой новой платы Service Port получает новый COM (свой серийник FT232).
+    Ищем плату: сначала prefer (порт из списка), потом порты FTDI, потом остальные; пропускаем exclude
+    (порты других приборов) и переходники MOXA (через RS-485 плата тоже ответит — но это не Service Port).
+    -> порт или None."""
+    ex = {e.upper() for e in exclude if e}
+    ports = [p for p in lp.comports() if p.device.upper() not in ex and p.vid != MOXA_VID
+             and "MOXA" not in (p.description or "").upper() and not (p.vid == SCANNER_VID and p.pid == SCANNER_PID)]
+    ports.sort(key=lambda p: (p.device != prefer, p.vid != FTDI_VID))
+    for p in ports:
+        if p.device != prefer:
+            log(f"Ищу плату: {p.device} ({p.description})…")
+        if probe_board(p.device, baud):
+            return p.device
+    return None
+
+
 def probe_ca71(port):
     try:
         with serial.Serial(port, 9600, bytesize=8, parity="N", stopbits=2, timeout=0.6) as s:
@@ -69,13 +90,20 @@ def probe_relay(port):
         return False
 
 
+def is_moxa(port):
+    for p in lp.comports():
+        if p.device == port:
+            return p.vid == MOXA_VID or "MOXA" in (p.description or "").upper()
+    return False
+
+
 def quick_check(saved, log=lambda s: None):
     """Сначала проверяем порты, сохранённые с прошлого раза: {'board': 'COM9', ...} -> что ответило."""
     probes = {"board": probe_board, "relay": probe_relay, "cal": probe_ca71}
     have = {p.device for p in lp.comports()}
     out = {}
     for name, port in saved.items():
-        if port and port in have and name in probes and probes[name](port):
+        if port and port in have and name in probes and not is_moxa(port) and probes[name](port):
             out[name] = port
             log(f"{port}: {dict(board='плата MK201', relay='блок реле', cal='калибратор CA71')[name]} (как в прошлый раз)")
     return out
@@ -84,13 +112,17 @@ def quick_check(saved, log=lambda s: None):
 def autodetect(log=lambda s: None, busy=(), known=None):
     """-> {'board': порт|None, 'relay': ..., 'cal': ..., 'scanner': ...}. busy — открытые нами порты (не трогать),
     known — уже найденное (эти порты и роли не проверяются повторно)."""
-    found = {"board": None, "relay": None, "cal": None, "scanner": None}
+    found = {"board": None, "relay": None, "cal": None, "scanner": None, "rs485": None}
     found.update({k: v for k, v in (known or {}).items() if k in found and v})
     busy = set(busy) | {v for v in found.values() if v}
     rest = []
     for p in lp.comports():
         if p.vid == SCANNER_VID and p.pid == SCANNER_PID:
             found["scanner"] = p.device; log(f"Сканер: {p.device}")
+        elif p.vid == MOXA_VID or "MOXA" in (p.description or "").upper():
+            # переходник RS-485: не опрашиваем (через него плата ответит и её порт перепутается)
+            if not found["rs485"]:
+                found["rs485"] = p.device; log(f"Переходник RS-485 MOXA: {p.device}")
         elif p.device in busy or all(found[k] for k in ("board", "relay", "cal")):
             continue
         else:
