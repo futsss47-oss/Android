@@ -103,7 +103,7 @@ def quick_check(saved, log=lambda s: None):
     have = {p.device for p in lp.comports()}
     out = {}
     for name, port in saved.items():
-        if port and port in have and name in probes and not is_moxa(port) and probes[name](port):
+        if port and port in have and name in probes and not (name == "board" and is_moxa(port)) and probes[name](port):
             out[name] = port
             log(f"{port}: {dict(board='плата MK201', relay='блок реле', cal='калибратор CA71')[name]} (как в прошлый раз)")
     return out
@@ -115,18 +115,31 @@ def autodetect(log=lambda s: None, busy=(), known=None):
     found = {"board": None, "relay": None, "cal": None, "scanner": None, "rs485": None}
     found.update({k: v for k, v in (known or {}).items() if k in found and v})
     busy = set(busy) | {v for v in found.values() if v}
-    rest = []
+    rest, moxa = [], []
     for p in lp.comports():
         if p.vid == SCANNER_VID and p.pid == SCANNER_PID:
             found["scanner"] = p.device; log(f"Сканер: {p.device}")
         elif p.vid == MOXA_VID or "MOXA" in (p.description or "").upper():
-            # переходник RS-485: не опрашиваем (через него плата ответит и её порт перепутается)
-            if not found["rs485"]:
-                found["rs485"] = p.device; log(f"Переходник RS-485 MOXA: {p.device}")
+            # 02.11.2026: на MOXA могут быть и калибратор CA71 (RS-232), и переходник RS-485 к плате.
+            # Плату на MOXA не ищем (через RS-485 она тоже ответит), CA71 — ищем; оставшийся порт MOXA — RS-485.
+            if p.device not in busy:
+                moxa.append(p.device)
         elif p.device in busy or all(found[k] for k in ("board", "relay", "cal")):
             continue
         else:
             rest.append(p)
+    for port in moxa:
+        if not found["cal"]:
+            log(f"Проверяю {port} (MOXA) — калибратор CA71?…")
+            if probe_ca71(port):
+                found["cal"] = port
+                log(f"  {port}: калибратор CA71 (через MOXA)")
+    left = [m for m in moxa if m != found["cal"]]
+    if not found["rs485"] and len(left) == 1:
+        found["rs485"] = left[0]
+        log(f"Переходник RS-485 (MOXA): {left[0]}")
+    elif len(left) > 1:
+        log(f"Портов MOXA несколько ({', '.join(left)}) — переходник RS-485 выберите вручную")
     for p in rest:
         if all(found[k] for k in ("board", "relay", "cal")):
             break
