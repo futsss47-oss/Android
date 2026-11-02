@@ -159,7 +159,7 @@ fun Root(
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
-                0 -> HomeScreen(vm)
+                0 -> HomeScreen(vm, onOpenListok = { tab = 2 }, onOpenTabel = { tab = 1 })
                 1 -> TabelScreen(vm)
                 2 -> ListokScreen(vm)
                 else -> SettingsScreen(vm)

@@ -43,7 +43,7 @@ abstract class BaseOvertimeWidget : AppWidgetProvider() {
 }
 
 /**
- * Виджет 3×2 «Месяц»: на руки за месяц, сверхурочные месяца, сегодня или идущая, кнопка старт/стоп.
+ * Виджет 3×2 «Месяц» (пихтовый, как табельные часы): к выплате за месяц, сверхурочные месяца, сегодня или идущая, кнопка старт/стоп.
  * Имя класса не менять: виджет уже стоит на рабочих столах.
  */
 class OvertimeWidget : BaseOvertimeWidget()
@@ -51,10 +51,10 @@ class OvertimeWidget : BaseOvertimeWidget()
 /** Виджет 1×1 «Кнопка»: круглая кнопка старт/стоп и таймер или итог дня под ней. */
 class ButtonWidget : BaseOvertimeWidget()
 
-/** Виджет 2×1 «Полоса» (растягивается до 4×1): статус или таймер, на руки за месяц, кнопка. */
+/** Виджет 2×1 «Полоса» (растягивается до 4×1): статус или таймер, к выплате за месяц, кнопка. */
 class BarWidget : BaseOvertimeWidget()
 
-/** Виджет 4×2 «Подробно»: на руки, аванс и остаток, сверхурочные месяца, сегодня, кнопка. */
+/** Виджет 4×2 «Подробно»: к выплате, аванс и остаток, сверхурочные месяца, сегодня, кнопка. */
 class DetailWidget : BaseOvertimeWidget()
 
 /** Нажатие на кнопку виджета: запускает или останавливает ручную сверхурочную. */
@@ -151,9 +151,9 @@ object WidgetUpdater {
         val views = RemoteViews(context.packageName, R.layout.widget_bar)
         views.setTextViewText(
             R.id.w_status,
-            s.timer?.let { "Идёт · $it" } ?: ("Сегодня " + formatMinutes(s.todayMinutes)),
+            s.timer?.let { "Идёт, $it" } ?: ("Сегодня " + formatMinutes(s.todayMinutes)),
         )
-        views.setTextViewText(R.id.w_net, "На руки " + formatRub(s.calc.summary.net))
+        views.setTextViewText(R.id.w_net, "К выплате " + formatRub(s.calc.summary.net))
         bindCommon(context, views, s)
         return views
     }
@@ -163,7 +163,7 @@ object WidgetUpdater {
         views.setTextViewText(R.id.w_net, formatRub(s.calc.summary.net))
         views.setTextViewText(R.id.w_month, monthOvertimeText(s))
         views.setTextViewText(R.id.w_status, statusText(s))
-        bindCommon(context, views, s)
+        bindCommon(context, views, s, hero = true)
         return views
     }
 
@@ -178,26 +178,32 @@ object WidgetUpdater {
         return views
     }
 
-    /** «Сверхурочные 12 ч 30 мин · +8 400 ₽». */
+    /** «Сверхурочные 12 ч 30 мин, +8 400 ₽». */
     private fun monthOvertimeText(s: WidgetState): String {
         val report = s.calc.report
         val base = "Сверхурочные " + formatMinutes(report.totalMinutes)
-        return if (report.totalNet > 0.5) base + " · +" + formatRub(report.totalNet) else base
+        return if (report.totalNet > 0.5) base + ", +" + formatRub(report.totalNet) else base
     }
 
-    /** «Идёт с 18:05 · 1:12» или «Сегодня 2 ч · +1 200 ₽». */
+    /** «Идёт с 18:05, 1:12» или «Сегодня 2 ч, +1 200 ₽». */
     private fun statusText(s: WidgetState): String {
         if (s.runningStart != null && s.timer != null) {
-            return "Идёт с " + s.runningStart.format(TIME_FMT) + " · " + s.timer
+            return "Идёт с " + s.runningStart.format(TIME_FMT) + ", " + s.timer
         }
         val base = "Сегодня " + formatMinutes(s.todayMinutes)
-        return if (s.todayNet > 0.5) base + " · +" + formatRub(s.todayNet) else base
+        return if (s.todayNet > 0.5) base + ", +" + formatRub(s.todayNet) else base
     }
 
-    /** Кнопка старт/стоп и нажатия: фон открывает приложение, кнопка переключает ручную сверхурочную. */
-    private fun bindCommon(context: Context, views: RemoteViews, s: WidgetState) {
+    /**
+     * Кнопка старт/стоп и нажатия: фон открывает приложение, кнопка переключает ручную сверхурочную.
+     * [hero] — виджет на пихтовом фоне («Месяц»): кнопка «стоп» там светлая, иначе сливается с фоном.
+     */
+    private fun bindCommon(context: Context, views: RemoteViews, s: WidgetState, hero: Boolean = false) {
         if (s.manualRunning) {
-            views.setImageViewResource(R.id.w_button, R.drawable.widget_button_stop)
+            views.setImageViewResource(
+                R.id.w_button,
+                if (hero) R.drawable.widget_button_stop_hero else R.drawable.widget_button_stop,
+            )
             views.setContentDescription(R.id.w_button, context.getString(R.string.widget_stop))
         } else {
             views.setImageViewResource(R.id.w_button, R.drawable.widget_button_start)
