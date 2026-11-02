@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Круглая кнопка «стоп» (оранжевая) виджета: круг + значок по центру. -->
+<!-- Круглая кнопка «стоп» виджета: пихта (в тёмной теме светлая пихта) и квадратик по центру. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">

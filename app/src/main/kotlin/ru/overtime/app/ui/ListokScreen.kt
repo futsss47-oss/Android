@@ -156,7 +156,7 @@ fun ListokScreen(vm: AppViewModel) {
 
 /** Белая карточка-таблица: начислено, удержано, выплачено и раскрывашка «Как посчитан аванс». */
 @Composable
-private fun SheetCard(month: YearMonth, calc: MonthCalc, settings: Settings) {
+internal fun SheetCard(month: YearMonth, calc: MonthCalc, settings: Settings) {
     val s = calc.summary
     val report = calc.report
     val leave = calc.leave
@@ -377,7 +377,7 @@ private fun DetailRow(label: String, value: String, strong: Boolean = false) {
 
 /** Плашка «К выплате» цвета пихты: подпись слева, сумма справа. */
 @Composable
-private fun PayoutPlate(net: Double) {
+internal fun PayoutPlate(net: Double) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -407,7 +407,7 @@ private fun PayoutPlate(net: Double) {
  * Каждое корректное значение сразу уходит в [onPaid], пустое поле — null.
  */
 @Composable
-private fun ReconcileCard(month: YearMonth, expected: Double, savedPaid: Double?, onPaid: (Double?) -> Unit) {
+internal fun ReconcileCard(month: YearMonth, expected: Double, savedPaid: Double?, onPaid: (Double?) -> Unit) {
     var text by rememberSaveable(month) { mutableStateOf(savedPaid?.let { sheetAmount(it) } ?: "") }
     val parsed = parsePaid(text)
     val bad = text.isNotBlank() && parsed == null

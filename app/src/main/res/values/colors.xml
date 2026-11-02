@@ -1,14 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#1B4F9C</color>
-    <!-- Виджеты и плитка: фирменные цвета, светлая тема. -->
+    <!-- Виджеты и плитка: «Проходная», светлая тема. Белая карточка, графитовый текст, пихта. -->
     <color name="widget_bg">#FFFFFFFF</color>
-    <color name="widget_text">#FF12201C</color>
-    <color name="widget_text_secondary">#FF55655F</color>
-    <color name="widget_accent">#FF0F6E56</color>
-    <!-- Значок «старт» на зелёной кнопке. -->
-    <color name="widget_on_accent">#FFFFFFFF</color>
-    <!-- Кнопка «стоп» и значок на ней. -->
-    <color name="widget_stop">#FFE0782B</color>
-    <color name="widget_on_stop">#FFFFFFFF</color>
+    <color name="widget_text">#FF1C2422</color>
+    <color name="widget_text_secondary">#FF4E5A55</color>
+    <color name="widget_accent">#FF123B33</color>
+    <!-- Текст и значки на пихте. -->
+    <color name="widget_on_accent">#FFEEF0EA</color>
+    <!-- Кнопка «старт»: сигнальный жёлтый, значок только тёмный (контраст 9:1). -->
+    <color name="widget_start">#FFF2B705</color>
+    <color name="widget_on_start">#FF1C2422</color>
+    <!-- Кнопка «стоп»: пихта, значок цвета бланка (контраст 11:1). -->
+    <color name="widget_stop">#FF123B33</color>
+    <color name="widget_on_stop">#FFEEF0EA</color>
+    <!-- Виджет «Месяц»: всегда пихта, как табельные часы, в обеих темах. -->
+    <color name="widget_hero_bg">#FF123B33</color>
+    <color name="widget_hero_text">#FFEEF0EA</color>
+    <color name="widget_hero_text_secondary">#FF9FB8AE</color>
+    <!-- Кнопка «стоп» на пихте: бланк со значком графитового цвета (контраст 13:1). -->
+    <color name="widget_hero_stop">#FFEEF0EA</color>
+    <color name="widget_hero_on_stop">#FF1C2422</color>
 </resources>

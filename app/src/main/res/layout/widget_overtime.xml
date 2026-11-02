@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Виджет 3×2 «Месяц»: на руки крупно, сверхурочные месяца, сегодня или идущая, кнопка старт/стоп. -->
+<!-- Виджет 3×2 «Месяц»: пихтовая карточка, как табельные часы. К выплате крупно, сверхурочные месяца,
+     сегодня или идущая, кнопка старт/стоп. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/w_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@drawable/widget_background"
+    android:background="@drawable/widget_background_hero"
     android:orientation="vertical"
     android:paddingStart="16dp"
     android:paddingTop="12dp"
@@ -17,8 +18,8 @@
         android:layout_height="wrap_content"
         android:ellipsize="end"
         android:maxLines="1"
-        android:text="На руки за месяц"
-        android:textColor="@color/widget_text_secondary"
+        android:text="К выплате за месяц"
+        android:textColor="@color/widget_hero_text_secondary"
         android:textSize="12sp" />
 
     <TextView
@@ -28,7 +29,7 @@
         android:ellipsize="end"
         android:maxLines="1"
         android:text="—"
-        android:textColor="@color/widget_text"
+        android:textColor="@color/widget_hero_text"
         android:textSize="26sp"
         android:textStyle="bold" />
 
@@ -39,7 +40,7 @@
         android:ellipsize="end"
         android:maxLines="1"
         android:text="Сверхурочные 0 мин"
-        android:textColor="@color/widget_accent"
+        android:textColor="@color/widget_hero_text"
         android:textSize="13sp" />
 
     <TextView
@@ -61,7 +62,7 @@
             android:ellipsize="end"
             android:maxLines="1"
             android:text="Сегодня 0 мин"
-            android:textColor="@color/widget_text"
+            android:textColor="@color/widget_hero_text"
             android:textSize="14sp" />
 
         <ImageView

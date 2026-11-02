@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Круглая кнопка «старт» (зелёная) виджета: круг + значок по центру. -->
+<!-- Круглая кнопка «старт» виджета: сигнальный жёлтый круг и тёмный треугольник по центру. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="oval">
-            <solid android:color="@color/widget_accent" />
+            <solid android:color="@color/widget_start" />
             <size
                 android:width="48dp"
                 android:height="48dp" />

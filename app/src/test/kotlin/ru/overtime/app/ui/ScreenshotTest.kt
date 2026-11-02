@@ -110,16 +110,16 @@ abstract class ScreenshotBase(device: DeviceConfig) {
     }
 
     @Test
-    fun monthMain() = page {
-        MonthMainPage(
+    fun tabelPage() = page {
+        TabelPage(
             month = month,
             calc = calc,
             settings = settings,
             sessions = sessions,
             now = now,
             onMonthChange = {},
-            onOpenPayslip = {},
-            onOpenCalendar = {},
+            onSetAbsence = { _, _ -> },
+            onSetDayKind = { _, _ -> },
             onAdd = {},
             onShare = {},
             onSessionClick = {},
@@ -127,45 +127,14 @@ abstract class ScreenshotBase(device: DeviceConfig) {
     }
 
     @Test
-    fun monthCards() = shot {
-        MonthHeader(month) {}
-        MonthHeroCard(month, calc)
-        OvertimeChartCard(month, calc.report, settings, now.toLocalDate())
-        MonthLinksCard(calc, onOpenPayslip = {}, onOpenCalendar = {})
-    }
-
-    @Test
     fun sessionsCard() = shot { SessionsCard(sessions, now, onAdd = {}, onShare = {}, onSessionClick = {}) }
 
     @Test
-    fun payslipPage() = page {
-        PayslipPage(month = month, calc = calc, settings = settings, onBack = {}, onSaveOverride = {})
-    }
-
-    @Test
-    fun payslipCards() = shot {
-        PayslipTiles(calc.summary)
-        PayslipLinesCard(calc, settings)
-        AdvanceDetailsCard(month, calc.advance, initiallyOpen = true)
-    }
-
-    @Test
-    fun calendarPage() = page {
-        CalendarPage(
-            month = month,
-            calc = calc,
-            settings = settings,
-            onBack = {},
-            onSetAbsence = { _, _ -> },
-            onSetDayKind = { _, _ -> },
-            today = now.toLocalDate(),
-        )
-    }
-
-    @Test
-    fun calendarCards() = shot {
-        CalendarTotalsCard(month, settings)
-        LeavePayCard(calc.leave, settings)
+    fun listokCards() = shot {
+        MonthHeader("Расчётный листок", month) {}
+        SheetCard(month, calc, settings)
+        PayoutPlate(calc.summary.net)
+        ReconcileCard(month, calc.summary.net, 64_395.40) {}
     }
 
     @Test

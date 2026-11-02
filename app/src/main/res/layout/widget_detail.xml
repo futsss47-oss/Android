@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Виджет 4×2 «Подробно»: на руки, аванс и остаток, сверхурочные месяца, сегодня, кнопка старт/стоп. -->
+<!-- Виджет 4×2 «Подробно»: к выплате, аванс и остаток, сверхурочные месяца, сегодня, кнопка старт/стоп. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/w_root"
     android:layout_width="match_parent"
@@ -28,7 +28,7 @@
                 android:layout_height="wrap_content"
                 android:ellipsize="end"
                 android:maxLines="1"
-                android:text="На руки за месяц"
+                android:text="К выплате за месяц"
                 android:textColor="@color/widget_text_secondary"
                 android:textSize="12sp" />
 

@@ -1,11 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Виджеты и плитка: фирменные цвета, тёмная тема. -->
-    <color name="widget_bg">#FF1A2420</color>
+    <!-- Виджеты и плитка: «Проходная», тёмная тема. -->
+    <color name="widget_bg">#FF17201D</color>
     <color name="widget_text">#FFDDE4E1</color>
     <color name="widget_text_secondary">#FFB0BDB8</color>
-    <color name="widget_accent">#FF7FD6B6</color>
-    <color name="widget_on_accent">#FF0B2A20</color>
-    <color name="widget_stop">#FFE0782B</color>
-    <color name="widget_on_stop">#FFFFFFFF</color>
+    <color name="widget_accent">#FFA8D5C2</color>
+    <color name="widget_on_accent">#FF0B2A24</color>
+    <!-- Кнопка «старт»: сигнальный жёлтый с тёмным значком, как в светлой теме. -->
+    <color name="widget_start">#FFF2B705</color>
+    <color name="widget_on_start">#FF1C2422</color>
+    <!-- Кнопка «стоп»: светлая пихта, значок цвета часовой плитки (контраст 10:1). -->
+    <color name="widget_stop">#FFA8D5C2</color>
+    <color name="widget_on_stop">#FF0B2A24</color>
+    <!-- Виджет «Месяц»: пихта и в тёмной теме. -->
+    <color name="widget_hero_bg">#FF123B33</color>
+    <color name="widget_hero_text">#FFEEF0EA</color>
+    <color name="widget_hero_text_secondary">#FF9FB8AE</color>
+    <color name="widget_hero_stop">#FFEEF0EA</color>
+    <color name="widget_hero_on_stop">#FF1C2422</color>
 </resources>
