@@ -232,9 +232,10 @@ class MK201:
             self.unblock()
         self.write_regs(ADDR_DATETIME_SET, hms + ymd if order == "hms" else ymd + hms)
 
-    # 02.11.2026: плата ответила «запись принята», а часы остались 01.01.2000 — запись молча отброшена.
-    # Пробуем варианты по очереди и проверяем чтением; сработавший запоминаем до конца работы программы.
-    DT_METHODS = (("hms", False), ("hms", True), ("ymd", False), ("ymd", True))
+    # 02.11.2026: плата ответила «запись принята», а часы сразу после записи ещё старые (01.01.2000);
+    # со второго раза время встало — плата применяет его не мгновенно. Поэтому после записи часы читаются
+    # несколько раз (до wait с), не встало — та же запись ещё раз; другие варианты — только запасные.
+    DT_METHODS = (("hms", False), ("hms", False), ("hms", True), ("ymd", False), ("ymd", True))
     dt_method = None
 
     def datetime_diff(self):
@@ -246,25 +247,31 @@ class MK201:
             return (y, mo, d, h, mi, s), float("inf")
         return (y, mo, d, h, mi, s), abs(time.time() - board)
 
-    def datetime_sync(self, log=print, tol=2.0, settle=1.0):
+    def datetime_sync(self, log=print, tol=2.0, settle=0.5, wait=3.0):
         """Записать время ПК и убедиться чтением, что часы платы его приняли. -> (ok, время платы, расхождение)."""
         methods = list(self.DT_METHODS)
-        if MK201.dt_method in methods:
+        if MK201.dt_method in methods and MK201.dt_method != methods[0]:
             methods.remove(MK201.dt_method); methods.insert(0, MK201.dt_method)
         names = {"hms": "час-мин-сек-год-мес-день", "ymd": "год-мес-день-час-мин-сек"}
         board, diff = None, float("inf")
         for n, (order, unb) in enumerate(methods):
-            if n:
+            if n and (order, unb) == methods[n - 1]:
+                log("Время не встало — записываю ещё раз")
+            elif n:
                 log(f"Время не встало — пробую запись: порядок {names[order]}" + (", с ключом разблокировки" if unb else ""))
             try:
                 self.datetime_write(order=order, unblock=unb)
             except ModbusError as e:
                 log(f"  плата отказала: {e}")
                 continue
-            time.sleep(settle)
-            board, diff = self.datetime_diff()
+            t0 = time.time()
+            while True:                                  # плата применяет время не сразу — ждём до wait с
+                time.sleep(settle)
+                board, diff = self.datetime_diff()
+                if diff <= tol or time.time() - t0 >= wait:
+                    break
             if diff <= tol:
-                if MK201.dt_method != (order, unb) and n:
+                if MK201.dt_method != (order, unb) and (order, unb) != ("hms", False):
                     log(f"Время записалось так: порядок {names[order]}" + (", с ключом разблокировки" if unb else "")
                         + " — дальше пишу так же")
                 MK201.dt_method = (order, unb)
