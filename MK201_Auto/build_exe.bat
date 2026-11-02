@@ -19,7 +19,11 @@ rem Старые файлы с прежними именами удаляем, чтобы не путались.
 for %%f in (workflow settings stats labels ports relay firmware instruments simulator fallback) do if exist %%f.py del /q %%f.py
 if exist __pycache__ rmdir /s /q __pycache__
 if exist build rmdir /s /q build
+rem 02.11.2026: номер версии берётся из mk201_version.py и вшивается в свойства exe
+for /f "delims=" %%v in ('%PY% mk201_version.py version_info.txt') do set VER=%%v
+echo Версия: %VER%
 %PY% -m PyInstaller --noconfirm --clean --onedir --windowed --name MK201_Auto --distpath dist ^
+  --version-file version_info.txt ^
   --collect-submodules pyvisa ^
   --hidden-import serial.tools.list_ports ^
   --hidden-import openpyxl ^
@@ -41,9 +45,12 @@ if exist MK201_Auto.exe del /q MK201_Auto.exe
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 if exist MK201_Auto.spec del /q MK201_Auto.spec
+if exist version_info.txt del /q version_info.txt
+echo MK201 Auto %VER%> MK201_Auto_app\VERSION.txt
 
 echo.
-echo Готово: %CD%\MK201_Auto_app\MK201_Auto.exe
+echo Готово: MK201 Auto %VER%
+echo %CD%\MK201_Auto_app\MK201_Auto.exe
 echo Запускать можно без администратора. Ярлык на рабочий стол - на этот exe.
 echo На другой ПК переносить всю папку MK201_Auto_app целиком.
 pause

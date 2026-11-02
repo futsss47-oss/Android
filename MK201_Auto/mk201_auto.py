@@ -44,7 +44,7 @@ APPDIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 CFG = os.path.join(APPDIR, "mk201_auto.json")
 LOGDIR = os.path.join(APPDIR, "logs")
 TRACE = os.path.join(LOGDIR, time.strftime("mk201_%Y-%m-%d_%H%M%S.log"))     # свой файл на каждый запуск программы
-VERSION = "02.11.2026-3 · связь с платой по Service Port / Modbus RTU / Modbus TCP"
+from mk201_version import VERSION, NUM as VERSION_NUM   # номер версии меняется только в mk201_version.py
 LOCKFILE = os.path.join(APPDIR, "mk201_fw_lock.json")   # есть файл = плата после загрузки ПО не подтвердила запуск
 STEPS = [("power", "Ток и мощность потребления (CH1)"),
          ("ports", "Порты 1–3 (MbSlave, Master 0–2)"), ("time", "Дата и время с ПК"),
@@ -326,7 +326,7 @@ class App(ManualMixin):
         except Exception:
             pass
         _prepare_logs()
-        self.root = tk.Tk(); self.root.title(f"MK201 Auto — прошивка, калибровка, проверка, протокол  ({VERSION})")
+        self.root = tk.Tk(); self.root.title(f"MK201 Auto {VERSION} — прошивка, калибровка, проверка, протокол")
         self.root.geometry("1120x740"); self.root.minsize(960, 600)
         apply_theme(self.root)
         _messageboxes_on(self.root)               # сообщения — по центру окна программы
@@ -384,6 +384,7 @@ class App(ManualMixin):
         # --- верхняя полоса: всегда видна ---
         top = tk.Frame(r, bg=C_HEAD, padx=12, pady=8); top.pack(fill="x")
         tk.Label(top, text="MK201 Auto", bg=C_HEAD, fg=C_HEAD_TEXT, font=("Segoe UI", 14, "bold")).pack(side="left")
+        tk.Label(top, text=f"v{VERSION_NUM}", bg=C_HEAD, fg=C_HEAD_MUTED, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(6, 0), pady=(3, 0))
         tk.Frame(top, bg=C_HEAD, width=14).pack(side="left")
         self.chip = tk.Label(top, text="Готов к работе", bg=C_ACCENT, fg="#ffffff", font=("Segoe UI", 10, "bold"), padx=12, pady=3)
         self.chip.pack(side="left")
