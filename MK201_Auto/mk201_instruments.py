@@ -56,13 +56,16 @@ def list_resources():
     out = []
     for r in res:
         name = ""
+        i = None
         try:
             i = rm.open_resource(r, open_timeout=1500)
             i.timeout = 1500; i.write_termination = "\n"; i.read_termination = "\n"
             name = i.query("*IDN?").strip()
-            i.close()
         except Exception:
             pass
+        finally:                                  # 02.11.2026: сеанс закрывается и при таймауте *IDN?
+            try: i is not None and i.close()
+            except Exception: pass
         out.append((r, f"{r} — {name}" if name else r))
     return out
 
@@ -79,17 +82,37 @@ class _Visa:
 
     def __init__(self, resource, log=None):
         self.log = log or (lambda s: None)
-        rm = _rm()
-        self.inst = rm.open_resource(resource, open_timeout=3000)
-        self.inst.timeout = 5000
-        self.inst.write_termination = "\n"
-        self.inst.read_termination = "\n"
         self.resource = resource
+        self._open()
         try:
             self.idn = self.query("*IDN?")
         except Exception as e:                   # прибор выбран оператором — работаем и без ответа на *IDN?
             self.idn = ""
             self.log(f"*IDN? без ответа ({e}) — всё равно пробую команды")
+
+    def _open(self):
+        self.inst = _rm().open_resource(self.resource, open_timeout=3000)
+        self.inst.timeout = 5000
+        self.inst.write_termination = "\n"
+        self.inst.read_termination = "\n"
+
+    def reopen(self):
+        """После переподключения USB (кнопка «Повторить»): новый сеанс VISA к тому же прибору."""
+        try: self.inst.close()
+        except Exception: pass
+        time.sleep(0.5)
+        self._open()
+
+    def alive(self):
+        """Прибор отвечает? Не ответил — один раз переоткрыть сеанс и спросить снова."""
+        for n in range(2):
+            try:
+                self.inst.query("*IDN?"); return True
+            except Exception:
+                if n == 0:
+                    try: self.reopen()
+                    except Exception: return False
+        return False
 
     def write(self, cmd):
         self.log(f"→ {cmd}")
@@ -117,9 +140,11 @@ class PSU(_Visa):
         self.recognized = kind_of(resource, self.idn) == "psu"
         if not self.recognized:
             if strict:
+                _Visa.close(self)
                 raise RuntimeError(f"На {resource} не АКИП-1168 (ответ «{self.idn}»)")
             self.log(f"ответ «{self.idn}» не похож на АКИП-1168 — прибор выбран вручную, команды всё равно отправляю")
         if int(channel) == 1:
+            _Visa.close(self)
             raise RuntimeError("CH1 — питание платы; для проверок используется CH2")
         self.ch = f"CH{int(channel)}"
 
@@ -174,6 +199,7 @@ class Generator(_Visa):
         self.recognized = kind_of(resource, self.idn) == "gen"
         if not self.recognized:
             if strict:
+                _Visa.close(self)
                 raise RuntimeError(f"На {resource} не АКИП-3409 (ответ «{self.idn}»)")
             self.log(f"ответ «{self.idn}» не похож на АКИП-3409 — прибор выбран вручную, команды всё равно отправляю")
         self.c = f"C{int(channel)}"

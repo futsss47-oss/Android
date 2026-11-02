@@ -335,8 +335,46 @@ class Runner:
         return True
 
     # ---- шаг 5: проверка AI ----
+    def prev_meas(self, kind, n, npts):
+        """Замеры прошлого прогона этого номера за сегодня (из .json протокола): {канал: [точки]} или None."""
+        r = (self.cfg.get("prev_results") or {}).get(kind)
+        if isinstance(r, dict):
+            r = [r.get(str(ch), r.get(ch)) for ch in range(n)]
+        try:
+            out = [[float(v) for v in r[ch]] for ch in range(n)]
+        except (TypeError, ValueError, IndexError, KeyError):
+            return None
+        return out if all(len(x) == npts for x in out) else None
+
+    def measure_ai_channels(self, sp, meas, chans):
+        """Замер только указанных каналов AI во всех точках (каналы вне допуска)."""
+        for i, s in enumerate(sp):
+            self.set_current(s)
+            for ch in chans:
+                self.chk()
+                self.detail(f"AI{ch} · {s:g} мА")
+                self.sw_ai(ch)
+                self.reassert()
+                v = statistics.mean(self.dev.ai_ma()[ch] for _ in range(self.samples))
+                meas[ch][i] = v
+                good = abs((v - s) * 100 / 16) <= self.tol
+                self.hook("point", "ai", ch, i, s, v, good)
+                self.log(f"AI{ch} @ {s:g} мА: {v:.3f} мА — {'OK' if good else 'ВНЕ ДОПУСКА'}")
+            self.relay.off()
+
     def step_ai_check(self, proto):
         sp = proto.setpoints_ai()
+        prev = self.prev_meas("ai", self.n_ai, len(sp)) if self.cfg.get("retry_bad") else None
+        if prev is not None:
+            # 02.11.2026: «Повторить непройденные» — прошлые замеры годных каналов остаются, перемеряются только плохие
+            bad = self.failed(sp, prev, self.n_ai)
+            if bad:
+                for ch in range(self.n_ai):
+                    for i, s in enumerate(sp):
+                        self.hook("point", "ai", ch, i, s, prev[ch][i], abs((prev[ch][i] - s) * 100 / 16) <= self.tol)
+                self.log("Повтор: перемеряю только каналы вне допуска — " + ", ".join(f"AI{c}" for c in bad)
+                         + "; остальные — из прошлого прогона")
+                return self._finish_ai_check(proto, sp, prev, self.measure_ai_channels(sp, prev, bad) or True)
         meas = [[] for _ in range(self.n_ai)]
         ok = True
         for i, s in enumerate(sp):
@@ -352,7 +390,10 @@ class Runner:
                          + ("" if good else f" — погрешность {err:+.3f}% ВНЕ ДОПУСКА"))
                 if not good:
                     ok = False
-        ok = self.remeasure_ai(sp, meas) and ok
+        return self._finish_ai_check(proto, sp, meas, ok)
+
+    def _finish_ai_check(self, proto, sp, meas, ok):
+        ok = self.remeasure_ai(sp, meas) and not self.failed(sp, meas, self.n_ai)
         self.same_channels("ai", {ch: tuple(round(v, 3) for v in meas[ch]) for ch in range(self.n_ai)},
                            "одинаковые показания во всех точках")
         for ch in range(self.n_ai):
@@ -379,18 +420,7 @@ class Runner:
             if not self.ask(f"Вне допуска: {names}.\nПеремерить только эти каналы?", "Перемерить", "Оставить как есть"):
                 return False
             self.log(f"Повторный замер: {names}")
-            for i, s in enumerate(sp):
-                self.set_current(s)
-                for ch in bad:
-                    self.chk()
-                    self.sw_ai(ch)
-                    self.reassert()
-                    v = statistics.mean(self.dev.ai_ma()[ch] for _ in range(self.samples))
-                    meas[ch][i] = v
-                    good = abs((v - s) * 100 / 16) <= self.tol
-                    self.hook("point", "ai", ch, i, s, v, good)
-                    self.log(f"AI{ch} @ {s:g} мА: {v:.3f} мА — {'OK' if good else 'ВНЕ ДОПУСКА'}")
-                self.relay.off()
+            self.measure_ai_channels(sp, meas, bad)
         return not self.failed(sp, meas, self.n_ai)
 
     def remeasure_ao(self, sp_by_ch, meas, tries=2):
@@ -484,7 +514,25 @@ class Runner:
     # ---- шаг 7: проверка AO ----
     def step_ao_check(self, proto):
         sp_by_ch, meas = {}, {}
-        for ch in range(2):
+        prev = None
+        if self.cfg.get("retry_bad"):
+            sps = {ch: proto.setpoints_ao(ch) for ch in range(2)}
+            prev = self.prev_meas("ao", 2, len(sps[0]))
+            bad = [ch for ch in range(2) if prev and any(abs((v - s) * 100 / 16) > self.tol for v, s in zip(prev[ch], sps[ch]))]
+            if prev is not None and bad:
+                self.log("Повтор: перемеряю только " + ", ".join(f"AO{c}" for c in bad) + "; остальные — из прошлого прогона")
+                for ch in range(2):
+                    sp_by_ch[ch], meas[ch] = sps[ch], list(prev[ch])
+                    for i, s in enumerate(sps[ch]):
+                        v = prev[ch][i] if ch not in bad else self.measure_ao(ch, s)
+                        meas[ch][i] = v
+                        good = abs((v - s) * 100 / 16) <= self.tol
+                        self.hook("point", "ao", ch, i, s, v, good)
+                        if ch in bad:
+                            self.log(f"[AO-повтор · AO{ch}] {s:g} мА → {v:.3f} мА" + ("" if good else " — ВНЕ ДОПУСКА"))
+            else:
+                prev = None
+        for ch in (range(2) if prev is None else ()):
             sp = proto.setpoints_ao(ch)
             sp_by_ch[ch], meas[ch] = sp, []
             for i, s in enumerate(sp):

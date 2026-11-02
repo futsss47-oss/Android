@@ -908,6 +908,7 @@ class App(ManualMixin):
     def _open_visa(self, res, auto=False):
         a = self.root.after; log = self.ui.log; S = self.S
         new_psu = False
+        self._drop_stale_visa(auto)
         if self.psu is None:
             pr = self._pick_visa(res, "psu", auto)
             if pr:
@@ -940,6 +941,32 @@ class App(ManualMixin):
             else:
                 a(0, self.set_dot, "gen", "man", "вручную — по подсказкам программы")
         return new_psu
+
+    def _drop_stale_visa(self, auto):
+        """02.11.2026: «Подключить» берёт то, что выбрано. Уже открытый блок питания / генератор закрывается,
+        если в списке выбран другой прибор (или «— вручную —» при ручном подключении) либо он не отвечает
+        даже после переоткрытия сеанса. Блок питания закрывается без выключения выходов (CH1 питает плату)."""
+        for name, what in (("psu", "Блок питания"), ("gen", "Генератор")):
+            obj = getattr(self, name)
+            if obj is None:
+                continue
+            cur = instruments.resource_of(self.v[self._key(name)].get())
+            why = ""
+            if cur and cur != obj.resource:
+                why = f"в списке выбран другой прибор ({cur})"
+            elif not cur and not auto:
+                why = "в списке выбрано «— вручную —»"
+            else:
+                with self.ilock:
+                    if not obj.alive():
+                        why = "не отвечает"
+            if why:
+                self.ui.log(f"{what} {obj.resource}: {why} — отключаю", "warn")
+                instruments._Visa.close(obj)
+                setattr(self, name, None)
+                if name == "psu":
+                    self.board_power = False
+                    self.root.after(0, self.set_power_lbl)
 
     def power_board(self, on=True, wait=True):
         """CH1 блока питания: питание платы. Включили — ждём, пока появится и ответит порт платы."""
@@ -986,7 +1013,15 @@ class App(ManualMixin):
         except Exception as e: self.ui.log(f"{type(e).__name__}: {e}", "err")
 
     def _timed(self, fn, limit, what, default):
-        """Выполнить fn не дольше limit секунд (в отдельном потоке); не успел — default и предупреждение."""
+        """Выполнить fn не дольше limit секунд (в отдельном потоке); не успел — default и предупреждение.
+        Пока прошлый такой же поток ещё висит (прибор VISA не ответил), новый не запускается —
+        иначе два потока откроют один прибор одновременно."""
+        hung = getattr(self, "_hung", {})
+        self._hung = hung
+        old = hung.get(what)
+        if old is not None and old.is_alive():
+            self.ui.log(f"{what}: прошлая попытка ещё ждёт ответа прибора — пропускаю (переподключите USB прибора)", "warn")
+            return default
         box = []
         def run():
             try: box.append(fn())
@@ -995,6 +1030,7 @@ class App(ManualMixin):
         t.start(); t.join(limit)
         if t.is_alive() or not box:
             if t.is_alive():
+                hung[what] = t
                 self.ui.log(f"{what}: нет ответа за {limit} с — продолжаю без этого (приборы — вручную)", "warn")
             return default
         return box[0]
@@ -1360,7 +1396,9 @@ class App(ManualMixin):
                                 "(или по этому номеру сегодня ещё не было прогона)."); return
         if messagebox.askyesno("Повторить непройденные",
                                f"№ {num}. Повторить шаги:\n\n" + "\n".join("• " + STEP_NAMES[k] for k in failed)
-                               + "\n\nРезультаты допишутся в тот же протокол."):
+                               + "\n\nРезультаты допишутся в тот же протокол."
+                               + ("\nПроверка AI / AO: перемеряются только каналы вне допуска, годные берутся из прошлого прогона."
+                                  if {"ai_check", "ao_check"} & set(failed) else "")):
             self.start(only=failed)
 
     # ================= прогон =================
@@ -1375,6 +1413,7 @@ class App(ManualMixin):
         self.m_dio_power(False)                    # 24 В ручного режима на CH2 — выключить, дальше CH2 у сценария
         self.manual_close()
         self.run_steps = list(only) if only else [k for k, _ in STEPS if self.steps[k].get()]
+        self.retry_mode = bool(only)              # «Повторить непройденные»: AI/AO — только каналы вне допуска
         self.running = True; self.apply_lock()
         self.save(); self.ui.stopped = False; self.ui.skip = False
         for k in self.step_lbl: self.set_step(k, "wait" if k in self.run_steps else "skip")
@@ -1510,7 +1549,7 @@ class App(ManualMixin):
                        ifaces={n: x.get() for n, x in self.iface.items()},
                        gen_method=v["gen_method"] or "burst", gen_trig=v["gen_trig"] or "C1:BTWV MTRIG",
                        rs485_port="" if sim else self.port("rs485_port"), sim=sim, version=VERSION,
-                       unit=int(v["unit"] or 1), base_protocol=base,
+                       unit=int(v["unit"] or 1), base_protocol=base, retry_bad=bool(getattr(self, "retry_mode", False)),
                        prev_steps=(prev.get("results", {}).get("steps_all") or prev.get("results", {}).get("steps") or {}),
                        prev_results=prev.get("results", {}))
             if sim:

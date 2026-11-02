@@ -13,8 +13,16 @@ class CA71:
     MF_CURRENT = 7                     # функция измерения «Current»
 
     def __init__(self, port, timeout=2.0, log=None):
+        self.port, self.timeout = port, timeout
         self.ser = serial.Serial(port, 9600, bytesize=8, parity="N", stopbits=2, timeout=timeout)
         self.log = log
+
+    def reopen(self):
+        """После переподключения USB (кнопка «Повторить»): закрыть и открыть тот же порт заново."""
+        try: self.ser.close()
+        except Exception: pass
+        time.sleep(0.5)
+        self.ser = serial.Serial(self.port, 9600, bytesize=8, parity="N", stopbits=2, timeout=self.timeout)
 
     def close(self):
         try:

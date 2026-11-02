@@ -83,6 +83,14 @@ class SafeDev:
                             "Проверьте кабель USB и питание прибора и нажмите «Повторить» "
                             "или продолжайте без него («Дальше вручную»).")
                     if self._ui.ask(text, "Повторить", "Дальше вручную"):
+                        # 02.11.2026: после переподключения USB старый порт/сеанс мёртв — открываем заново
+                        reopen = getattr(self._dev, "reopen", None)
+                        if reopen:
+                            try:
+                                reopen()
+                                self._ui.log(f"{self._name}: соединение открыто заново")
+                            except Exception as e2:
+                                self._ui.log(f"{self._name}: не открылся заново ({e2})")
                         continue
                     self._go_manual(str(e))
                     m = getattr(self._manual, name, None)

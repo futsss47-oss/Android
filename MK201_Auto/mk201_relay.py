@@ -45,6 +45,10 @@ class Relay:
         self.ser.write((line + "\n").encode())
         return self.ser.readline().decode(errors="replace").strip()
 
+    def reopen(self):
+        with self.lock:
+            self.reconnect()
+
     def reconnect(self, wait=10.0):
         """Порт «пропал» (USB-переподключение ESP32, ошибка WriteFile / Отказано в доступе):
         закрыть и открыть заново, пока Windows не вернёт порт (до wait секунд)."""
