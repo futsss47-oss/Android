@@ -41,8 +41,10 @@ data class MonthOverride(
     val bonus: Double? = null,
     val bonusPercent: Double? = null,
     val workedDays: Int? = null,
+    /** Сколько фактически пришло на карту за месяц (для сверки с расчётом). */
+    val paid: Double? = null,
 ) {
-    val isEmpty: Boolean get() = norm == null && bonus == null && bonusPercent == null && workedDays == null
+    val isEmpty: Boolean get() = norm == null && bonus == null && bonusPercent == null && workedDays == null && paid == null
 }
 
 /** Все настройки приложения. Деньги везде в рублях. */
@@ -223,7 +225,7 @@ data class Settings(
         if (sickPercent < 0 || sickPercent > 100) errors += "Процент больничного должен быть от 0 до 100%"
         if ((vacationEarnings12m ?: 0.0) < 0 || (sickEarnings2y ?: 0.0) < 0) errors += "Начисления не могут быть отрицательными"
         for ((key, o) in monthOverrides) {
-            if ((o.norm ?: 0.0) < 0 || (o.bonus ?: 0.0) < 0 || (o.bonusPercent ?: 0.0) < 0 || (o.workedDays ?: 0) < 0) {
+            if ((o.norm ?: 0.0) < 0 || (o.bonus ?: 0.0) < 0 || (o.paid ?: 0.0) < 0 || (o.bonusPercent ?: 0.0) < 0 || (o.workedDays ?: 0) < 0) {
                 errors += "Отрицательное значение в правке месяца $key"
             }
         }

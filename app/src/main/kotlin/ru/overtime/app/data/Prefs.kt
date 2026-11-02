@@ -85,6 +85,7 @@ object SettingsJson {
             m.bonus?.let { mj.put("bonus", it) }
             m.bonusPercent?.let { mj.put("bonusPct", it) }
             m.workedDays?.let { mj.put("days", it) }
+            m.paid?.let { mj.put("paid", it) }
             months.put(key, mj)
         }
         o.put("months", months)
@@ -191,6 +192,7 @@ object SettingsJson {
                 bonus = if (mj.has("bonus")) mj.getDouble("bonus") else null,
                 bonusPercent = if (mj.has("bonusPct")) mj.getDouble("bonusPct") else null,
                 workedDays = if (mj.has("days")) mj.getInt("days") else null,
+                paid = if (mj.has("paid")) mj.getDouble("paid") else null,
             )
             if (!m.isEmpty) result[key] = m
         }

@@ -1,0 +1,2 @@
+Шрифты Golos Text (Paratype) и Unbounded (NaN) распространяются по лицензии SIL Open Font License 1.1:
+https://openfontlicense.org — их можно встраивать в приложения, в том числе коммерческие.

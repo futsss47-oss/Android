@@ -129,6 +129,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         app.settingsRepo.save(s.copy(wallpaperColors = on))
     }
 
+    /** Сколько пришло на карту за месяц (сверка с листком); null — стереть. Остальные правки месяца не трогает. */
+    fun savePaid(month: YearMonth, paid: Double?) {
+        val s = app.settingsRepo.current()
+        val key = month.toString()
+        val o = (s.monthOverrides[key] ?: MonthOverride()).copy(paid = paid)
+        val map = s.monthOverrides.toMutableMap()
+        if (o.isEmpty) map.remove(key) else map[key] = o
+        app.settingsRepo.save(s.copy(monthOverrides = map))
+    }
+
     /** Правка дней, нормы и премии одного месяца. Пустые поля = автоматически / из общих настроек. */
     fun saveMonthOverride(month: YearMonth, o: MonthOverride) {
         val s = app.settingsRepo.current()

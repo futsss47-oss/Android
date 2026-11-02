@@ -41,6 +41,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import ru.overtime.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Warning
@@ -53,13 +56,28 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.sp
 
-/** Скругления: поля ввода 12 dp, карточки 24 dp, главные карточки и диалоги 28 dp, кнопки «таблеткой». */
+/** Скругления по важности: 20 — часы и главная карточка, 16 — карточки, 12 — кнопки и поля, 10 — ячейки табеля. */
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(12.dp),
-    small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(28.dp),
+    extraSmall = RoundedCornerShape(10.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(20.dp),
+)
+
+/** Golos Text (ParaType) — весь интерфейс. Лицензия OFL 1.1, файлы в res/font. */
+val Golos = FontFamily(
+    Font(R.font.golos_regular, FontWeight.Normal),
+    Font(R.font.golos_medium, FontWeight.Medium),
+    Font(R.font.golos_semibold, FontWeight.SemiBold),
+    Font(R.font.golos_semibold, FontWeight.Bold),
+)
+
+/** Unbounded — табельные часы, суммы и заголовки разделов. Лицензия OFL 1.1. */
+val Unbounded = FontFamily(
+    Font(R.font.unbounded_medium, FontWeight.Medium),
+    Font(R.font.unbounded_semibold, FontWeight.SemiBold),
+    Font(R.font.unbounded_semibold, FontWeight.Bold),
 )
 
 private val AppTypography: Typography
@@ -67,109 +85,122 @@ private val AppTypography: Typography
         val base = Typography()
         // Цифры одинаковой ширины: суммы и часы стоят ровной колонкой и не «прыгают» при обновлении.
         val tnum = "tnum"
+        fun TextStyle.display() = copy(fontFamily = Unbounded, fontWeight = FontWeight.SemiBold, fontFeatureSettings = tnum)
+        fun TextStyle.ui(w: FontWeight? = null) = copy(fontFamily = Golos, fontWeight = w ?: fontWeight, fontFeatureSettings = tnum)
         return base.copy(
-            displayLarge = base.displayLarge.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = tnum),
-            displayMedium = base.displayMedium.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = tnum),
-            displaySmall = base.displaySmall.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = tnum),
-            headlineLarge = base.headlineLarge.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = tnum),
-            headlineMedium = base.headlineMedium.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = tnum),
-            headlineSmall = base.headlineSmall.copy(fontWeight = FontWeight.Bold, fontFeatureSettings = tnum),
-            titleLarge = base.titleLarge.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = tnum),
-            titleMedium = base.titleMedium.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = tnum),
-            titleSmall = base.titleSmall.copy(fontWeight = FontWeight.SemiBold, fontFeatureSettings = tnum),
-            bodyLarge = base.bodyLarge.copy(fontFeatureSettings = tnum),
-            bodyMedium = base.bodyMedium.copy(fontFeatureSettings = tnum),
-            bodySmall = base.bodySmall.copy(fontFeatureSettings = tnum),
-            labelLarge = base.labelLarge.copy(fontFeatureSettings = tnum),
-            labelMedium = base.labelMedium.copy(fontFeatureSettings = tnum),
-            labelSmall = base.labelSmall.copy(fontFeatureSettings = tnum),
+            displayLarge = base.displayLarge.display(),
+            displayMedium = base.displayMedium.display(),
+            displaySmall = base.displaySmall.copy(fontSize = 34.sp, lineHeight = 40.sp).display(),
+            headlineLarge = base.headlineLarge.display(),
+            headlineMedium = base.headlineMedium.copy(fontSize = 22.sp, lineHeight = 28.sp).display(),
+            headlineSmall = base.headlineSmall.copy(fontSize = 20.sp, lineHeight = 26.sp).display(),
+            titleLarge = base.titleLarge.ui(FontWeight.SemiBold),
+            titleMedium = base.titleMedium.copy(fontSize = 16.sp).ui(FontWeight.SemiBold),
+            titleSmall = base.titleSmall.ui(FontWeight.SemiBold),
+            bodyLarge = base.bodyLarge.copy(fontSize = 16.sp).ui(),
+            bodyMedium = base.bodyMedium.copy(fontSize = 15.sp, lineHeight = 21.sp).ui(),
+            bodySmall = base.bodySmall.copy(fontSize = 13.sp, lineHeight = 18.sp).ui(),
+            labelLarge = base.labelLarge.ui(FontWeight.SemiBold),
+            labelMedium = base.labelMedium.ui(FontWeight.Medium),
+            labelSmall = base.labelSmall.ui(FontWeight.Medium),
         )
     }
 
 /**
- * Фирменные цвета: глубокий зелёный («деньги»), фон чуть зеленоватый серый, выходные оранжевые.
- * Цвета отметок календаря отличаются и оттенком, и светлотой.
+ * «Проходная»: пихта (часы и «к выплате»), сигнальный жёлтый (идёт время, работа в выходной),
+ * бланк (фон), графит (текст), охра (выходные и сверхурочные часы в тексте).
+ * Старые имена (Green, Weekend…) оставлены, чтобы весь код подхватил новые цвета.
  */
 object Brand {
-    val Green = Color(0xFF0F6E56)
-    val GreenDark = Color(0xFF0A3D30)
-    val GreenContainer = Color(0xFFDDF1E8)
-    val OnHeroMuted = Color(0xFFCFEDE2)
-    val Weekend = Color(0xFFE0782B)
-    val WeekendText = Color(0xFFA34A0F)
-    val WeekendTextDark = Color(0xFFFFB98A)
-    val Warning = Color(0xFFFFF1D6)
-    val OnWarning = Color(0xFF5C3D00)
-    val Running = Color(0xFFE0782B)
-    val AtWork = Color(0xFF1F9D55)
+    val Pikhta = Color(0xFF123B33)
+    val ClockTile = Color(0xFF0B2A24)
+    val Signal = Color(0xFFF2B705)
+    val Blank = Color(0xFFEEF0EA)
+    val Graphite = Color(0xFF1C2422)
+    val Ochre = Color(0xFF7A5200)
+    val Muted = Color(0xFF4E5A55)
+    val OnPikhtaMuted = Color(0xFF9FB8AE)
+
+    val Green = Pikhta
+    val GreenDark = ClockTile
+    val GreenContainer = Color(0xFFD7E6DF)
+    val OnHeroMuted = OnPikhtaMuted
+    /** Столбики работы в выходной — сигнальный жёлтый (только графика, текст на нём тёмный). */
+    val Weekend = Signal
+    val WeekendText = Ochre
+    val WeekendTextDark = Color(0xFFF2C94C)
+    val Warning = Color(0xFFFFF3C4)
+    val OnWarning = Ochre
+    val Running = Signal
+    val AtWork = Color(0xFF3FA36C)
 }
 
-/** Цвета отметок календаря и их подписи. */
+/** Цвета отметок табеля: отпуск, больничный, отгул. */
 object AbsenceColors {
-    val VacationBg = Color(0xFFD6E4F7)
-    val VacationFg = Color(0xFF1D4F8C)
-    val SickBg = Color(0xFFFBDDC4)
-    val SickFg = Color(0xFF7A3B0C)
-    val DayOffBorder = Color(0xFF7A8783)
+    val VacationBg = Color(0xFFE3EBF7)
+    val VacationFg = Color(0xFF2B4C8C)
+    val SickBg = Color(0xFFF7E1DA)
+    val SickFg = Color(0xFF8C2F1B)
+    val DayOffBorder = Color(0xFF4E5A55)
 }
 
 private val LightBrand = lightColorScheme(
-    primary = Brand.Green,
-    onPrimary = Color.White,
+    primary = Brand.Pikhta,
+    onPrimary = Brand.Blank,
     primaryContainer = Brand.GreenContainer,
-    onPrimaryContainer = Brand.GreenDark,
-    secondary = Color(0xFF4C6359),
+    onPrimaryContainer = Brand.Pikhta,
+    secondary = Brand.Muted,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE3EBE7),
-    onSecondaryContainer = Color(0xFF12201C),
-    tertiary = Brand.Weekend,
+    secondaryContainer = Color(0xFFE6E9E2),
+    onSecondaryContainer = Brand.Graphite,
+    tertiary = Brand.Ochre,
     onTertiary = Color.White,
-    tertiaryContainer = Color(0xFFFBE6D4),
-    onTertiaryContainer = Color(0xFF6B3A10),
+    tertiaryContainer = Brand.Warning,
+    onTertiaryContainer = Brand.Ochre,
     error = Color(0xFFB3261E),
-    errorContainer = Color(0xFFFCE4E1),
+    errorContainer = Color(0xFFF7E1DA),
     onErrorContainer = Color(0xFF5F1410),
-    background = Color(0xFFF3F5F4),
-    onBackground = Color(0xFF12201C),
-    surface = Color(0xFFF3F5F4),
-    onSurface = Color(0xFF12201C),
-    surfaceVariant = Color(0xFFE6EBE9),
-    onSurfaceVariant = Color(0xFF55655F),
-    outline = Color(0xFF7A8783),
-    outlineVariant = Color(0xFFDCE2DF),
+    background = Brand.Blank,
+    onBackground = Brand.Graphite,
+    surface = Brand.Blank,
+    onSurface = Brand.Graphite,
+    surfaceVariant = Color(0xFFE6E9E2),
+    onSurfaceVariant = Brand.Muted,
+    outline = Color(0xFF9AA59F),
+    outlineVariant = Color(0xFFD8DDD5),
     surfaceContainerLowest = Color.White,
     surfaceContainerLow = Color.White,
     surfaceContainer = Color.White,
-    surfaceContainerHigh = Color(0xFFF3F5F4),
-    surfaceContainerHighest = Color(0xFFE6EBE9),
+    surfaceContainerHigh = Color(0xFFE6E9E2),
+    surfaceContainerHighest = Color(0xFFDDE1DA),
 )
 
 private val DarkBrand = darkColorScheme(
-    primary = Color(0xFF7FD6B6),
-    onPrimary = Color(0xFF00382A),
-    primaryContainer = Color(0xFF0F6E56),
-    onPrimaryContainer = Color(0xFFDDF1E8),
-    secondary = Color(0xFFB3CCC1),
-    onSecondary = Color(0xFF1F352C),
-    secondaryContainer = Color(0xFF2C3E37),
-    onSecondaryContainer = Color(0xFFDCE9E3),
-    tertiary = Color(0xFFFFB98A),
-    onTertiary = Color(0xFF4F2500),
-    tertiaryContainer = Color(0xFF6B3A10),
-    onTertiaryContainer = Color(0xFFFFDCC5),
-    background = Color(0xFF0F1513),
+    primary = Color(0xFFA8D5C2),
+    onPrimary = Brand.ClockTile,
+    primaryContainer = Brand.Pikhta,
+    onPrimaryContainer = Color(0xFFD7E6DF),
+    secondary = Color(0xFFB3C2BB),
+    onSecondary = Color(0xFF1F2E29),
+    secondaryContainer = Color(0xFF26312D),
+    onSecondaryContainer = Color(0xFFDDE4E1),
+    tertiary = Color(0xFFF2C94C),
+    onTertiary = Color(0xFF3A2A00),
+    tertiaryContainer = Color(0xFF4A3A0A),
+    onTertiaryContainer = Color(0xFFFFE8A3),
+    background = Color(0xFF0E1513),
     onBackground = Color(0xFFDDE4E1),
-    surface = Color(0xFF0F1513),
+    surface = Color(0xFF0E1513),
     onSurface = Color(0xFFDDE4E1),
-    surfaceVariant = Color(0xFF2A322F),
+    surfaceVariant = Color(0xFF26312D),
     onSurfaceVariant = Color(0xFFB0BDB8),
-    outline = Color(0xFF8A9893),
-    outlineVariant = Color(0xFF3A4440),
+    outline = Color(0xFF7D8A85),
+    outlineVariant = Color(0xFF2E3935),
     surfaceContainerLowest = Color(0xFF0A0F0D),
-    surfaceContainerLow = Color(0xFF17201D),
-    surfaceContainer = Color(0xFF1A2420),
-    surfaceContainerHigh = Color(0xFF222C29),
-    surfaceContainerHighest = Color(0xFF2C3733),
+    surfaceContainerLow = Color(0xFF151D1A),
+    surfaceContainer = Color(0xFF17201D),
+    surfaceContainerHigh = Color(0xFF1F2925),
+    surfaceContainerHighest = Color(0xFF28332F),
 )
 
 /** true, если сейчас тёмная тема: нужно для цветов, которых нет в схеме (выходные, отметки). */
@@ -198,15 +229,15 @@ fun AppTheme(dynamic: Boolean = false, content: @Composable () -> Unit) {
 @Composable
 fun weekendTextColor(): Color = if (LocalDarkTheme.current) Brand.WeekendTextDark else Brand.WeekendText
 
-/** Главная карточка с суммой: залита основным цветом, текст белый. */
+/** Главная карточка (часы, сумма): всегда пихта с текстом цвета бланка, в светлой и тёмной теме. */
 @Composable
 fun HeroCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
+            containerColor = Brand.Pikhta,
+            contentColor = Brand.Blank,
         ),
     ) {
         Column(
@@ -219,7 +250,7 @@ fun HeroCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() 
 
 /** Приглушённый текст на [HeroCard]. */
 @Composable
-fun heroMuted(): Color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+fun heroMuted(): Color = Brand.OnPikhtaMuted
 
 /**
  * Сумма «рубли крупно, копейки мельче»: **65 635**,40 ₽.
@@ -294,9 +325,9 @@ fun NavRow(title: String, subtitle: String?, onClick: () -> Unit) {
     }
 }
 
-val CARD_SHAPE = RoundedCornerShape(24.dp)
+val CARD_SHAPE = RoundedCornerShape(16.dp)
 
-/** Мягкая карточка: тональный фон без тени, скругление 24 dp. */
+/** Карточка: белый фон на бланке, без тени, скругление 16 dp. */
 @Composable
 fun SoftCard(
     modifier: Modifier = Modifier,
