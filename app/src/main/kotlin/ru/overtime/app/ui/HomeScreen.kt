@@ -8,16 +8,35 @@ import android.os.Build
 import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,16 +45,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,17 +60,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import ru.overtime.app.data.TimeConv
 import ru.overtime.app.location.Perms
+import ru.overtime.domain.Absence
+import ru.overtime.domain.Leave
 import ru.overtime.domain.MonthCalc
 import ru.overtime.domain.Settings
 import ru.overtime.domain.TrackerState
@@ -62,14 +94,12 @@ import java.time.DayOfWeek
 import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 private val HEADER_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("EEEE, d MMMM", RU)
-private val MONTH_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("LLLL", RU)
 
-/** Короткие названия месяцев в родительном падеже: «26–28 окт». */
-private val MONTH_SHORT = listOf("янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+/** Название месяца в именительном падеже, со строчной: «октябрь». */
+private val MONTH_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("LLLL", RU)
 
 /** Предупреждать, если ручной таймер идёт дольше стольких часов. */
 private const val LONG_MANUAL_HOURS = 6
@@ -77,13 +107,57 @@ private const val LONG_MANUAL_HOURS = 6
 private const val UI_PREFS = "overtime_ui"
 private const val KEY_SAMSUNG_TIP = "samsung_tip_seen"
 
-private fun timer(minutes: Int): String = String.format(RU, "%d:%02d", minutes / 60, minutes % 60)
+/** Размеры перекидной плитки часов по макету; на узких экранах плитки уменьшаются пропорционально. */
+private val TILE_WIDTH = 62.dp
+private const val TILE_RATIO = 84f / 62f
+private const val DIGIT_RATIO = 48f / 62f
+private val TILE_GAP = 6.dp
+private val COLON_WIDTH = 14.dp
+private val SECONDS_WIDTH = 28.dp
+
+/** Длительность смены цифры. */
+private const val FLIP_MS = 220
 
 /** Часы с точностью до десятой: «14 ч», «14,3 ч». */
 private fun hoursShort(minutes: Int): String = formatHours(Math.round(minutes / 6.0) / 10.0)
 
+private fun plural(n: Int, one: String, few: String, many: String): String {
+    val mod100 = n % 100
+    val mod10 = n % 10
+    return when {
+        mod100 in 11..14 -> many
+        mod10 == 1 -> one
+        mod10 in 2..4 -> few
+        else -> many
+    }
+}
+
+private fun pad2(n: Long): String = n.toString().padStart(2, '0')
+
+/** Включены ли системные анимации (в «Специальных возможностях» их можно отключить). */
 @Composable
-fun HomeScreen(vm: AppViewModel) {
+private fun rememberAnimationsEnabled(): Boolean {
+    val ctx = LocalContext.current
+    return remember {
+        val scale = try {
+            AndroidSettings.Global.getFloat(ctx.contentResolver, AndroidSettings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        } catch (_: Exception) {
+            1f
+        }
+        scale != 0f
+    }
+}
+
+/**
+ * Вкладка «Проходная»: табельные часы, сумма к выплате за месяц и мини-табель.
+ * [onOpenListok] открывает вкладку «Листок», [onOpenTabel] — «Табель».
+ */
+@Composable
+fun HomeScreen(
+    vm: AppViewModel,
+    onOpenListok: () -> Unit = {},
+    onOpenTabel: () -> Unit = {},
+) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val tracker by vm.tracker.collectAsStateWithLifecycle()
     val now by vm.clock.collectAsStateWithLifecycle()
@@ -94,271 +168,462 @@ fun HomeScreen(vm: AppViewModel) {
     val manualOpen = sessions.firstOrNull { it.manual && it.endMillis == null }
     val manualStart = manualOpen?.let { TimeConv.toLocal(it.startMillis) }
     val manualHours = manualStart?.let { Duration.between(it, now).toHours() } ?: 0L
+    val rule = settings.ruleFor(today)
 
     Column(
         Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(start = 20.dp, end = 20.dp, top = 28.dp, bottom = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 now.format(HEADER_DATE).replaceFirstChar { it.uppercase() },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f).alignByBaseline(),
             )
-            Text("Сверхурочные", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(
+                if (rule.workday) "смена до ${rule.end.format(TIME_FMT)}" else "сегодня выходной",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.alignByBaseline(),
+            )
         }
 
         PermissionsCard(onPermissionsChanged = { vm.refreshGeofence() })
 
-        MonthHero(calc = calc, today = today)
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            TimeClock(
+                settings = settings,
+                tracker = tracker,
+                today = today,
+                manualStart = manualStart,
+                todayNet = calc.report.days.firstOrNull { it.date == today }?.net,
+                onStart = { vm.manualStart() },
+                onStop = { vm.manualStop() },
+            )
+            calendarHint(settings, today)?.let {
+                Box(Modifier.padding(horizontal = 2.dp)) { Hint(it) }
+            }
+        }
 
         if (manualStart != null && manualHours >= LONG_MANUAL_HOURS) {
-            WarningStrip("Таймер идёт уже $manualHours ч — не забыли остановить?")
+            WarningStrip("Таймер идёт уже $manualHours ч, не забыли остановить?")
         }
 
-        ShiftCard(
-            settings = settings,
-            tracker = tracker,
-            now = now,
-            manualStart = manualStart,
-            todayNet = calc.report.days.firstOrNull { it.date == today }?.net,
-            onStart = { vm.manualStart() },
-            onStop = { vm.manualStop() },
-        )
+        PayoutBlock(calc = calc, onOpen = onOpenListok)
+
+        MiniTabel(calc = calc, settings = settings, today = today, onOpen = onOpenTabel)
 
         if (settings.salary <= 0.0) {
-            SoftCard(container = MaterialTheme.colorScheme.tertiaryContainer) {
+            SoftCard {
                 Text("Заполните оплату", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Впишите оклад в «Настройки → Оплата», иначе суммы не посчитаются.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+                Hint("Впишите оклад в «Настройки → Оплата», иначе суммы не посчитаются.")
             }
         }
     }
 }
 
-/** Зелёная карточка: сколько придёт на руки за месяц, сверхурочные и ближайшая выплата. */
+/**
+ * Табельные часы: лампа и состояние, перекидные цифры ЧЧ:ММ, подсказка и большая кнопка.
+ * Пока идёт сверхурочная, секунды тикают по собственному таймеру экрана.
+ */
 @Composable
-private fun MonthHero(calc: MonthCalc, today: LocalDate) {
-    val report = calc.report
-    val summary = calc.summary
-    val month = summary.month
-    val muted = heroMuted()
-    HeroCard {
-        Text(
-            "Ожидается на руки за ${month.format(MONTH_NAME)}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = muted,
-        )
-        MoneyText(
-            value = summary.net,
-            big = MaterialTheme.typography.displaySmall.copy(fontSize = 44.sp, lineHeight = 50.sp),
-            color = MaterialTheme.colorScheme.onPrimary,
-            mutedColor = muted,
-        )
-        Text(
-            "Начислено ${formatMoney(summary.gross)} · НДФЛ ${formatRub(summary.tax)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = muted,
-        )
-        val leaveParts = buildList {
-            if (calc.leave.vacationPay > 0.0) add("вкл. отпускные ${formatRub(calc.leave.vacationPay)}")
-            if (calc.leave.sickPay > 0.0) add("вкл. больничный ${formatRub(calc.leave.sickPay)}")
-        }
-        if (!calc.leave.isEmpty && leaveParts.isNotEmpty()) {
-            Text(leaveParts.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = muted)
-        }
-        HorizontalDivider(
-            modifier = Modifier.padding(top = 4.dp),
-            thickness = 1.dp,
-            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f),
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            HeroCell(
-                label = "Сверхурочные",
-                value = "${hoursShort(report.totalMinutes)} · +${formatRub(report.totalNet)}",
-                modifier = Modifier.weight(1f),
-            )
-            val sameMonth = YearMonth.from(today) == month
-            if (!sameMonth || today.dayOfMonth <= 15) {
-                HeroCell(
-                    label = "Аванс 26–28 ${MONTH_SHORT[month.monthValue - 1]}",
-                    value = formatRub(calc.advance.net),
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                val next = month.plusMonths(1)
-                HeroCell(
-                    label = "Остаток 10–13 ${MONTH_SHORT[next.monthValue - 1]}",
-                    value = formatRub(calc.advance.rest),
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-        report.formulaError?.let {
-            Text(
-                "Ошибка в формуле: $it",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.errorContainer,
-            )
-        }
-    }
-}
-
-@Composable
-private fun HeroCell(label: String, value: String, modifier: Modifier) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = heroMuted(), maxLines = 1)
-        Text(
-            value,
-            style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
-    }
-}
-
-/** Белая карточка состояния смены: идёт сверхурочная, на работе или нет. */
-@Composable
-private fun ShiftCard(
+private fun TimeClock(
     settings: Settings,
     tracker: TrackerState,
-    now: LocalDateTime,
+    today: LocalDate,
     manualStart: LocalDateTime?,
     todayNet: Double?,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val today = now.toLocalDate()
+    val animate = rememberAnimationsEnabled()
     val runningSince = listOfNotNull(tracker.openStart, manualStart).minOrNull()
+    val running = runningSince != null
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer),
+    // Свой таймер раз в секунду — только пока идёт сверхурочная, иначе экран не перерисовывается зря.
+    var tick by remember { mutableStateOf(LocalDateTime.now()) }
+    LaunchedEffect(runningSince) {
+        if (runningSince != null) {
+            while (true) {
+                tick = LocalDateTime.now()
+                delay(1000L)
+            }
+        }
+    }
+    val elapsed = if (runningSince != null) Duration.between(runningSince, tick).seconds.coerceAtLeast(0L) else 0L
+    val hours = (elapsed / 3600).coerceAtMost(99L)
+    val minutes = (elapsed % 3600) / 60
+    val seconds = elapsed % 60
+
+    val rule = settings.ruleFor(today)
+    val presence = tracker.presenceSince
+    val lamp = when {
+        running -> Brand.Signal
+        presence != null -> Brand.AtWork
+        else -> Brand.OnPikhtaMuted
+    }
+    val title = when {
+        running -> "Идёт сверхурочная"
+        presence != null -> "На работе с ${presence.format(TIME_FMT)}"
+        !settings.hasWorkPlace -> "Место работы не задано"
+        else -> "Вы не на работе"
+    }
+    val hint = when {
+        runningSince != null -> {
+            val money = if (todayNet != null && todayNet > 0.5) ", это примерно +${formatRub(todayNet)} на руки" else ""
+            val end = if (manualStart != null) {
+                "Нажмите «Закончить», когда уйдёте."
+            } else {
+                "Остановится сама, когда выйдете с проходной."
+            }
+            "С ${runningSince.format(TIME_FMT)}$money. $end"
+        }
+        presence != null && rule.workday ->
+            "Сверхурочная начнётся сама в ${rule.end.format(TIME_FMT)}. Если геолокация подвела, отметьтесь вручную."
+        presence != null -> "Сегодня выходной: всё время на работе — сверхурочное."
+        !settings.hasWorkPlace -> "Укажите его в «Настройки → Место работы», тогда учёт пойдёт сам."
+        else -> "Учёт включится сам, когда придёте на работу."
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Brand.Pikhta)
+            .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Column(
-            Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            when {
-                runningSince != null -> {
-                    StatusTitle(
-                        dot = Brand.Running,
-                        title = "Идёт сверхурочная",
-                        pill = if (manualStart != null) "вручную" else "авто",
-                        pillColor = scheme.tertiaryContainer,
-                    )
-                    val minutes = Duration.between(runningSince, now).toMinutes().toInt().coerceAtLeast(0)
-                    Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text(
-                            timer(minutes),
-                            style = MaterialTheme.typography.displaySmall.copy(fontSize = 48.sp, lineHeight = 52.sp),
-                            modifier = Modifier.alignByBaseline(),
-                        )
-                        val money = if (todayNet != null && todayNet > 0.0) " · ≈ +${formatRub(todayNet)}" else ""
-                        Text(
-                            "с ${runningSince.format(TIME_FMT)}$money",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = scheme.onSurfaceVariant,
-                            modifier = Modifier.alignByBaseline(),
-                        )
-                    }
-                    if (manualStart != null) {
-                        Button(
-                            onClick = onStop,
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = scheme.onSurface,
-                                contentColor = scheme.surface,
-                            ),
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(14.dp)
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(LocalContentColor.current),
-                            )
-                            Text("Остановить", modifier = Modifier.padding(start = 8.dp), fontWeight = FontWeight.SemiBold)
-                        }
-                    } else {
-                        Hint("Закончится сама, когда уйдёте с работы.")
-                    }
-                }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Lamp(color = lamp, pulse = running && animate)
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = Brand.Blank,
+            )
+        }
 
-                tracker.presenceSince != null -> {
-                    val since = tracker.presenceSince!!
-                    StatusTitle(
-                        dot = Brand.AtWork,
-                        title = "На работе с ${since.format(TIME_FMT)}",
-                        pill = "авто · GPS",
-                        pillColor = scheme.primaryContainer,
-                    )
-                    val rule = settings.ruleFor(today)
-                    if (rule.workday) {
-                        val shiftStart = today.atTime(rule.start)
-                        val shiftEnd = today.atTime(rule.end)
-                        val from = if (since.isAfter(shiftStart)) since else shiftStart
-                        val total = Duration.between(from, shiftEnd).toMinutes()
-                        val done = Duration.between(from, now).toMinutes()
-                        val progress = if (total <= 0) 1f else (done.toFloat() / total).coerceIn(0f, 1f)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            ShiftProgress(progress)
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    from.format(TIME_FMT),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = scheme.onSurfaceVariant,
-                                )
-                                Text(
-                                    "Конец смены ${rule.end.format(TIME_FMT)} · дальше пойдёт сверхурочная",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = scheme.onSurfaceVariant,
-                                    textAlign = TextAlign.End,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            }
-                        }
-                    } else {
-                        Hint("Сегодня выходной: всё время — сверхурочная.")
-                    }
-                }
+        FlipDigits(
+            hours = if (running) hours else 0L,
+            minutes = if (running) minutes else 0L,
+            seconds = if (running) seconds else null,
+            animate = animate,
+            description = if (running) "Сверхурочная идёт $hours ч $minutes мин" else "Сверхурочная не идёт",
+        )
 
-                !settings.hasWorkPlace -> {
-                    StatusTitle(dot = scheme.outline, title = "Место работы не задано")
-                    Hint("Укажите его в «Настройки → Место работы», тогда учёт пойдёт сам.")
-                }
+        Text(
+            hint,
+            style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp),
+            color = Brand.OnPikhtaMuted,
+        )
 
-                else -> {
-                    StatusTitle(dot = scheme.outline, title = "Вы не на работе")
-                    Hint("Учёт включится сам, когда придёте на работу.")
-                }
+        if (manualStart == null) {
+            Button(
+                onClick = onStart,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Brand.Signal, contentColor = Brand.Graphite),
+            ) {
+                Icon(
+                    Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = Brand.Graphite,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Отметиться вручную", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
+        } else {
+            Button(
+                onClick = onStop,
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Brand.Blank, contentColor = Brand.Graphite),
+            ) {
+                Box(
+                    Modifier
+                        .size(14.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(Brand.Graphite),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text("Закончить сверхурочную", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
 
-            if (manualStart == null) {
-                FilledTonalButton(
-                    onClick = onStart,
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = scheme.primaryContainer,
-                        contentColor = scheme.onPrimaryContainer,
-                    ),
-                ) {
-                    Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+/** «Лампа» состояния, 10 dp. При [pulse] вокруг неё мягко расходится кольцо. */
+@Composable
+private fun Lamp(color: Color, pulse: Boolean) {
+    val halo = if (pulse) {
+        val transition = rememberInfiniteTransition(label = "lamp")
+        val progress by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Restart),
+            label = "lampHalo",
+        )
+        progress
+    } else {
+        null
+    }
+    Box(
+        Modifier
+            .size(10.dp)
+            .drawBehind {
+                if (halo != null) {
+                    drawCircle(
+                        color = color.copy(alpha = 0.55f * (1f - halo)),
+                        radius = size.minDimension / 2f + 7.dp.toPx() * halo,
+                    )
+                }
+                drawCircle(color = color)
+            },
+    )
+}
+
+/**
+ * Перекидные цифры ЧЧ:ММ и секунды справа ([seconds] = null — секунды не показываются).
+ * Плитки уменьшаются, если не помещаются по ширине (экран 360 dp и крупный шрифт).
+ */
+@Composable
+private fun FlipDigits(hours: Long, minutes: Long, seconds: Long?, animate: Boolean, description: String) {
+    val hh = pad2(hours)
+    val mm = pad2(minutes)
+    val density = LocalDensity.current
+    val secondsWidth = SECONDS_WIDTH * density.fontScale.coerceIn(1f, 2f)
+    BoxWithConstraints(
+        Modifier
+            .fillMaxWidth()
+            .clearAndSetSemantics { contentDescription = description },
+    ) {
+        val fixed = COLON_WIDTH + secondsWidth + TILE_GAP * 5
+        val tileWidth: Dp = ((maxWidth - fixed) / 4).coerceIn(32.dp, TILE_WIDTH)
+        val tileHeight = tileWidth * TILE_RATIO
+        // Цифры привязаны к размеру плитки, а не к настройке шрифта: иначе крупный шрифт вылезет за плитку.
+        val digitSize = with(density) { (tileWidth * DIGIT_RATIO).toSp() }
+        val digitStyle = TextStyle(
+            fontFamily = Unbounded,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = digitSize,
+            lineHeight = digitSize,
+            fontFeatureSettings = "tnum",
+            color = Brand.Blank,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(TILE_GAP)) {
+            FlipTile(hh[0], tileWidth, tileHeight, digitStyle, animate)
+            FlipTile(hh[1], tileWidth, tileHeight, digitStyle, animate)
+            Column(
+                Modifier.width(COLON_WIDTH),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(tileHeight / 6),
+            ) {
+                Box(Modifier.size(7.dp).background(Brand.OnPikhtaMuted, CircleShape))
+                Box(Modifier.size(7.dp).background(Brand.OnPikhtaMuted, CircleShape))
+            }
+            FlipTile(mm[0], tileWidth, tileHeight, digitStyle, animate)
+            FlipTile(mm[1], tileWidth, tileHeight, digitStyle, animate)
+            Box(Modifier.width(secondsWidth).height(tileHeight), contentAlignment = Alignment.BottomStart) {
+                if (seconds != null) {
                     Text(
-                        "Начать сверхурочную вручную",
-                        modifier = Modifier.padding(start = 8.dp),
-                        fontWeight = FontWeight.SemiBold,
+                        pad2(seconds),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Brand.OnPikhtaMuted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
             }
+        }
+    }
+}
 
-            calendarHint(settings, today)?.let { Hint(it) }
+/** Одна плитка: тёмный фон, цифра и линия-разрез посередине. Новая цифра въезжает снизу. */
+@Composable
+private fun FlipTile(digit: Char, width: Dp, height: Dp, style: TextStyle, animate: Boolean) {
+    Box(
+        Modifier
+            .size(width, height)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Brand.ClockTile),
+        contentAlignment = Alignment.Center,
+    ) {
+        AnimatedContent(
+            targetState = digit,
+            transitionSpec = {
+                if (animate) {
+                    (slideInVertically(tween(FLIP_MS)) { it } + fadeIn(tween(FLIP_MS))) togetherWith
+                        (slideOutVertically(tween(FLIP_MS)) { -it } + fadeOut(tween(FLIP_MS)))
+                } else {
+                    EnterTransition.None togetherWith ExitTransition.None
+                }
+            },
+            contentAlignment = Alignment.Center,
+            label = "digit",
+        ) { d ->
+            Text(d.toString(), style = style, maxLines = 1, softWrap = false)
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(2.dp)
+                .background(Brand.Pikhta),
+        )
+    }
+}
+
+/** «К выплате за октябрь»: сумма на руки и часть за сверхурочные; нажатие открывает «Листок». */
+@Composable
+private fun PayoutBlock(calc: MonthCalc, onOpen: () -> Unit) {
+    val summary = calc.summary
+    val report = calc.report
+    val scheme = MaterialTheme.colorScheme
+    val small = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClickLabel = "Открыть листок", role = Role.Button, onClick = onOpen)
+            .padding(horizontal = 2.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text("К выплате за ${summary.month.format(MONTH_NAME)}", style = small, color = scheme.onSurfaceVariant)
+        MoneyText(
+            value = summary.net,
+            big = MaterialTheme.typography.displaySmall,
+            color = scheme.onSurface,
+            mutedColor = scheme.onSurfaceVariant,
+        )
+        if (report.totalNet > 0.5) {
+            Text(
+                "из них за сверхурочные и выходные ${formatRub(report.totalNet)}",
+                style = small,
+                color = scheme.onSurfaceVariant,
+            )
+        }
+        val leaveParts = buildList {
+            if (calc.leave.vacationPay > 0.5) add("отпускные ${formatRub(calc.leave.vacationPay)}")
+            if (calc.leave.sickPay > 0.5) add("больничный ${formatRub(calc.leave.sickPay)}")
+        }
+        if (leaveParts.isNotEmpty()) {
+            Text("включая ${leaveParts.joinToString(", ")}", style = small, color = scheme.onSurfaceVariant)
+        }
+        report.formulaError?.let {
+            Text("Ошибка в формуле: $it", style = small, color = scheme.error)
+        }
+    }
+}
+
+/** Отметка дня на полоске мини-табеля. */
+private enum class StripMark { FUTURE, PRESENT, WEEKEND, WEEKEND_WORK, OVERTIME, VACATION, SICK, DAY_OFF }
+
+/** Мини-табель: полоска по дням месяца; нажатие открывает «Табель». */
+@Composable
+private fun MiniTabel(calc: MonthCalc, settings: Settings, today: LocalDate, onOpen: () -> Unit) {
+    val month = calc.summary.month
+    val worked = calc.report.days.filter { it.countedMinutes > 0 }.associateBy { it.date }
+    val marks = (1..month.lengthOfMonth()).map { day ->
+        val date = month.atDay(day)
+        val result = worked[date]
+        when {
+            date.isAfter(today) -> StripMark.FUTURE
+            result != null && result.dayOff -> StripMark.WEEKEND_WORK
+            result != null -> StripMark.OVERTIME
+            Leave.isLeaveDay(date, settings, Absence.SICK) -> StripMark.SICK
+            Leave.isLeaveDay(date, settings, Absence.VACATION) -> StripMark.VACATION
+            settings.absences[date] == Absence.DAY_OFF -> StripMark.DAY_OFF
+            settings.isCalendarWorkday(date) && settings.absences[date] == null -> StripMark.PRESENT
+            else -> StripMark.WEEKEND
+        }
+    }
+    // Явка — отработанный по календарю день (со сверхурочной или без), работа в выходной считается отдельно.
+    val presence = marks.count { it == StripMark.PRESENT || it == StripMark.OVERTIME }
+    val overtime = hoursShort(calc.report.totalMinutes)
+    val presenceText = "$presence ${plural(presence, "явка", "явки", "явок")}"
+    val monthName = month.format(MONTH_NAME)
+
+    val dark = LocalDarkTheme.current
+    val scheme = MaterialTheme.colorScheme
+    val presentColor = if (dark) Color(0xFF3A4A44) else Color(0xFFC9D6CF)
+    val weekendColor = if (dark) Color(0xFF2A3531) else Color(0xFFE2E5DE)
+    val vacationColor = if (dark) Color(0xFF3B5078) else Color(0xFFBFD1EC)
+    val sickColor = if (dark) Color(0xFF6E3D31) else Color(0xFFF2C4B6)
+    val overtimeColor = if (dark) Color(0xFFA8D5C2) else Brand.Pikhta
+    val barShape = RoundedCornerShape(3.dp)
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(scheme.surfaceContainer)
+            .clickable(onClick = onOpen)
+            .clearAndSetSemantics {
+                contentDescription = "Табель за $monthName: $presenceText, $overtime сверхурочных"
+                role = Role.Button
+                onClick(label = "Открыть табель") {
+                    onOpen()
+                    true
+                }
+            }
+            .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Табель",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "$presenceText, $overtime сверх",
+                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                color = scheme.onSurfaceVariant,
+            )
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            val dayOffBorder = scheme.onSurfaceVariant
+            for (mark in marks) {
+                val base = Modifier.weight(1f).height(22.dp)
+                val bar = when (mark) {
+                    StripMark.FUTURE -> base.border(1.dp, scheme.outlineVariant, barShape)
+                    StripMark.DAY_OFF -> base
+                        .clip(barShape)
+                        .background(scheme.surfaceContainer)
+                        .drawBehind {
+                            val w = 1.5.dp.toPx()
+                            drawRoundRect(
+                                color = dayOffBorder,
+                                topLeft = Offset(w / 2f, w / 2f),
+                                size = Size(size.width - w, size.height - w),
+                                cornerRadius = CornerRadius(3.dp.toPx()),
+                                style = Stroke(
+                                    width = w,
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 2.dp.toPx())),
+                                ),
+                            )
+                        }
+                    else -> {
+                        val color = when (mark) {
+                            StripMark.PRESENT -> presentColor
+                            StripMark.WEEKEND_WORK -> Brand.Signal
+                            StripMark.OVERTIME -> overtimeColor
+                            StripMark.VACATION -> vacationColor
+                            StripMark.SICK -> sickColor
+                            else -> weekendColor
+                        }
+                        base.clip(barShape).background(color)
+                    }
+                }
+                Box(bar)
+            }
         }
     }
 }
@@ -368,48 +633,13 @@ private fun calendarHint(settings: Settings, today: LocalDate): String? {
     val tomorrow = today.plusDays(1)
     val tomorrowWeekday = tomorrow.dayOfWeek != DayOfWeek.SATURDAY && tomorrow.dayOfWeek != DayOfWeek.SUNDAY
     if (settings.isHoliday(tomorrow) && settings.dayHours(tomorrow) == 0 && tomorrowWeekday) {
-        return "Завтра праздник: работа в этот день — ×2"
+        return "Завтра праздник: работа ×2"
     }
     if (settings.dayHours(today) == 7) {
         val rule = settings.ruleFor(today)
         if (rule.workday) return "Сегодня сокращённый день: сверхурочная с ${rule.end.format(TIME_FMT)}"
     }
     return null
-}
-
-@Composable
-private fun StatusTitle(dot: Color, title: String, pill: String? = null, pillColor: Color = Color.Unspecified) {
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        StatusDot(dot)
-        Text(title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-        if (pill != null) Pill(pill, pillColor)
-    }
-}
-
-/** Полоса прогресса смены: трек и заполненная часть со скруглёнными краями. */
-@Composable
-private fun ShiftProgress(progress: Float) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(8.dp)
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        if (progress > 0f) {
-            Box(
-                Modifier
-                    .fillMaxWidth(progress)
-                    .height(8.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary),
-            )
-        }
-    }
 }
 
 private fun openAppDetails(ctx: Context) {
