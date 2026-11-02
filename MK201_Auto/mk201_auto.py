@@ -44,15 +44,15 @@ APPDIR = os.path.dirname(os.path.abspath(sys.argv[0]))
 CFG = os.path.join(APPDIR, "mk201_auto.json")
 LOGDIR = os.path.join(APPDIR, "logs")
 TRACE = os.path.join(LOGDIR, time.strftime("mk201_%Y-%m-%d_%H%M%S.log"))     # свой файл на каждый запуск программы
-VERSION = "02.11.2026-2 · одна страница результатов, проверенная запись времени, DI/DO с 1"
+VERSION = "02.11.2026-3 · связь с платой по Service Port / Modbus RTU / Modbus TCP"
 LOCKFILE = os.path.join(APPDIR, "mk201_fw_lock.json")   # есть файл = плата после загрузки ПО не подтвердила запуск
 STEPS = [("power", "Ток и мощность потребления (CH1)"),
          ("ports", "Порты 1–3 (MbSlave, Master 0–2)"), ("time", "Дата и время с ПК"),
          ("serial", "Серийный № и MAC"), ("ai_cal", "Калибровка AI (прогрев, 4 и 20 мА)"),
          ("ai_check", "Проверка AI (0…20 мА)"), ("ao_cal", "Калибровка AO (4 и 19 мА)"),
          ("ao_check", "Проверка AO (0…20 мА)"), ("dio", "Проверка DO → DI (5 / 11 / 24 / 30 В)"),
-         ("ci", "Счётные входы CI (генератор, синус)"), ("eth", "Ethernet (Modbus TCP)"),
-         ("rs485", "RS-485 1–3 (переходник USB-RS485)")]
+         ("ci", "Счётные входы CI (генератор, синус)"), ("eth", "Ethernet: серийный, MAC, время по Modbus TCP"),
+         ("rs485", "RS-485 1–3: то же по Modbus RTU (3 клеммы)")]
 STEP_NAMES = dict(STEPS)
 STEP_DEFAULT_OFF = {"ci", "eth", "rs485"}
 DEF_SP = ["0", "4", "8", "12", "16", "20"]
@@ -131,10 +131,46 @@ def apply_theme(root):
     st.configure("Horizontal.TProgressbar", background=C_ACCENT, thickness=12)
 
 
+def center_on(win, parent, size=None):
+    """Окно — посередине окна программы (02.11.2026: раньше открывалось сверху слева). Окно программы
+    свёрнуто или ещё не показано — посередине экрана."""
+    win.update_idletasks()
+    w, h = size or (win.winfo_reqwidth(), win.winfo_reqheight())
+    try:
+        visible = parent.winfo_viewable() and parent.state() != "iconic"
+    except tk.TclError:
+        visible = False
+    if visible:
+        px, py, pw, ph = parent.winfo_rootx(), parent.winfo_rooty(), parent.winfo_width(), parent.winfo_height()
+    else:
+        px, py, pw, ph = 0, 0, win.winfo_screenwidth(), win.winfo_screenheight()
+    x = px + (pw - w) // 2
+    y = py + (ph - h) // 2
+    x = min(max(x, 0), max(win.winfo_screenwidth() - w, 0))
+    y = min(max(y, 0), max(win.winfo_screenheight() - h - 40, 0))
+    win.geometry(f"{w}x{h}+{x}+{y}" if size else f"+{x}+{y}")
+
+
+def _messageboxes_on(root):
+    """Стандартные сообщения (messagebox) — с окном программы как родителем: Windows ставит их по центру программы."""
+    for name in ("showinfo", "showwarning", "showerror", "askyesno", "askokcancel", "askyesnocancel", "askretrycancel"):
+        f = getattr(messagebox, name)
+        def wrap(*a, _f=f, **k):
+            if "parent" not in k:
+                try:
+                    w = root.focus_get()
+                    k["parent"] = w.winfo_toplevel() if w is not None else root
+                except Exception:
+                    k["parent"] = root
+            return _f(*a, **k)
+        setattr(messagebox, name, wrap)
+
+
 class Dialog(tk.Toplevel):
     """Модальное окно запроса оператору (крупный текст, при необходимости поле ввода)."""
     def __init__(self, parent, text, entry=False, ok_text="Готово", cancel_text="Остановить", unit="мА"):
         super().__init__(parent, bg=C_PANEL)
+        self.withdraw()                              # показать сразу на своём месте, без прыжка из угла
         self.result, self.entry = None, entry
         self.title("MK201 Auto")
         self.transient(parent); self.resizable(False, False)
@@ -160,10 +196,8 @@ class Dialog(tk.Toplevel):
         ttk.Button(bar, text=cancel_text, command=self.cancel).pack(side="right", padx=8)
         self.bind("<Return>", lambda e: self.ok()); self.bind("<Escape>", lambda e: self.cancel())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
-        self.update_idletasks()
-        x = parent.winfo_rootx() + (parent.winfo_width() - self.winfo_width()) // 2
-        y = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        center_on(self, parent)
+        self.deiconify()
         self.attributes("-topmost", True)
         try:
             self.wait_visibility(); self.grab_set()
@@ -236,6 +270,7 @@ class SettingsDialog(tk.Toplevel):
         self.app = app
         self.title("MK201 Auto — настройки")
         self.transient(app.root)
+        self.withdraw()
         self.geometry("820x640"); self.minsize(640, 360)
         bar = tk.Frame(self, bg=C_BG, padx=14, pady=10); bar.pack(side="bottom", fill="x")
         ttk.Button(bar, text="Сохранить", style="Accent.TButton", command=self.save).pack(side="right")
@@ -257,6 +292,7 @@ class SettingsDialog(tk.Toplevel):
                 ttk.Button(lf, text="↺", width=3, command=lambda v=v, d=default: v.set(self.fmt(d))).grid(row=r, column=3, padx=(6, 0))
                 self.vars[key], self.ent[key] = v, e
         self.bind("<Escape>", lambda e: self.destroy())
+        center_on(self, app.root, (820, 640)); self.deiconify()
 
     @staticmethod
     def fmt(x):
@@ -293,6 +329,7 @@ class App(ManualMixin):
         self.root = tk.Tk(); self.root.title(f"MK201 Auto — прошивка, калибровка, проверка, протокол  ({VERSION})")
         self.root.geometry("1120x740"); self.root.minsize(960, 600)
         apply_theme(self.root)
+        _messageboxes_on(self.root)               # сообщения — по центру окна программы
         try:
             c = json.load(open(CFG, encoding="utf-8")) if os.path.exists(CFG) else {}
         except Exception:
@@ -306,7 +343,10 @@ class App(ManualMixin):
         self.v = {k: tk.StringVar(value=str(c.get(k, d))) for k, d in dict(
             port="COM63", baud="115200", unit="1", relay_port="", cal_port="", serial="", mac="", hex_path="",
             template="", outdir="", protocol_number="", hv="3.3", scan_port="", rs485_port="",
-            psu_res="", gen_res="", operator="", gen_method="burst", gen_trig="C1:BTWV MTRIG").items()}
+            psu_res="", gen_res="", operator="", gen_method="burst", gen_trig="C1:BTWV MTRIG",
+            # 02.11.2026: связь с платой — Service Port / Modbus RTU (RS-485) / Modbus TCP
+            conn_mode="Service Port", rtu_baud="19200", rtu_parity="N", rtu_stop="1", rtu_unit="1",
+            tcp_ip="10.155.26.140", tcp_port="502", tcp_unit="1").items()}
         self.steps = {k: tk.BooleanVar(value=c.get("step_" + k, k not in STEP_DEFAULT_OFF)) for k, _ in STEPS}
         self.force = tk.BooleanVar(value=c.get("force", False))
         self.sim = tk.BooleanVar(value=c.get("sim", False))
@@ -488,6 +528,7 @@ class App(ManualMixin):
         ttk.Button(row2, text="Выключить", command=lambda: self.board_power_cmd(False)).pack(side="left", padx=(0, 10))
         self.pwr_lbl = ttk.Label(row2, text="", style="Muted.TLabel"); self.pwr_lbl.pack(side="left")
         self.refresh_ports(visa=False)
+        self._conn_box(f)
 
         lf = ttk.LabelFrame(f, text="Прошивка (обновление ПО платы)", padding=10); lf.pack(fill="x", pady=(0, 8))
         lf.columnconfigure(1, weight=1)
@@ -512,6 +553,98 @@ class App(ManualMixin):
         fld(4, "Запуск пакета:", "gen_trig", 22, list(instruments.Generator.TRIGGERS))
         ttk.Button(lf, text="⚙ Настройки… (задержки, номер протокола, допуски)", command=self.open_settings).grid(
             row=1, column=0, columnspan=6, sticky="w", pady=(8, 0))
+
+    CONN_MODES = ("Service Port", "Modbus RTU", "Modbus TCP")
+
+    def _conn_box(self, f):
+        """02.11.2026: как в конфигураторе — плата по Service Port, по RS-485 (Modbus RTU через переходник
+        USB-RS485) или по Ethernet (Modbus TCP, порт 502). Выбранный способ — для ручного режима и прогона;
+        шаги «Ethernet» и «RS-485 1–3» берут отсюда настройки RTU и TCP."""
+        lf = ttk.LabelFrame(f, text="Связь с платой (как в конфигураторе)", padding=10); lf.pack(fill="x", pady=(0, 8))
+        r0 = ttk.Frame(lf); r0.grid(row=0, column=0, columnspan=12, sticky="w", pady=(0, 6))
+        ttk.Label(r0, text="Подключаться к плате через:").pack(side="left", padx=(0, 8))
+        for m in self.CONN_MODES:
+            ttk.Radiobutton(r0, text=m, value=m, variable=self.v["conn_mode"]).pack(side="left", padx=(0, 12))
+        ttk.Label(r0, text="(загрузка ПО — только через Service Port)", style="Muted.TLabel").pack(side="left")
+
+        def cell(r, c, text, key, w, values=None):
+            ttk.Label(lf, text=text).grid(row=r, column=c, sticky="e", padx=(0 if c == 0 else 10, 4), pady=2)
+            if values:
+                ttk.Combobox(lf, textvariable=self.v[key], values=values, width=w, state="readonly").grid(row=r, column=c + 1, sticky="w")
+            else:
+                ttk.Entry(lf, textvariable=self.v[key], width=w).grid(row=r, column=c + 1, sticky="w")
+        ttk.Label(lf, text="Modbus RTU (RS-485):", font=FONT_B).grid(row=1, column=0, sticky="w")
+        cell(1, 1, "скорость", "rtu_baud", 8,
+             [str(b) for b in (1200, 2400, 4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200, 128000)])
+        cell(1, 3, "чётность", "rtu_parity", 3, ["N", "E", "O"])
+        cell(1, 5, "стоп", "rtu_stop", 3, ["1", "2"])
+        cell(1, 7, "адрес", "rtu_unit", 5)
+        ttk.Button(lf, text="Проверить связь", command=lambda: self.test_link("Modbus RTU")).grid(row=1, column=9, padx=(14, 0))
+        ttk.Button(lf, text="По умолч. модуля", command=lambda: [self.v[k].set(x) for k, x in
+                   (("rtu_baud", "19200"), ("rtu_parity", "N"), ("rtu_stop", "1"), ("rtu_unit", "1"))]).grid(row=1, column=10, padx=(6, 0))
+        ttk.Label(lf, text="Modbus TCP (Ethernet):", font=FONT_B).grid(row=2, column=0, sticky="w", pady=(4, 0))
+        cell(2, 1, "IP платы", "tcp_ip", 15)
+        cell(2, 3, "порт", "tcp_port", 6)
+        cell(2, 5, "адрес", "tcp_unit", 3)
+        ttk.Button(lf, text="Проверить связь", command=lambda: self.test_link("Modbus TCP")).grid(row=2, column=9, padx=(14, 0))
+        ttk.Label(lf, text="RTU — через «Переходник USB-RS485» (выбирается выше). Шаги «Ethernet» и «RS-485 1–3» (после счётных входов): программа отключается от Service Port, "
+                           "по TCP и по RTU на каждой клемме читает серийный номер, MAC, дату и время и сверяет с Service Port. "
+                           "Сеть ПК должна быть в подсети платы (например, IP ПК 10.155.26.100, маска 255.255.255.0).",
+                  style="Note.TLabel", wraplength=900, justify="left").grid(row=3, column=0, columnspan=12, sticky="w", pady=(6, 0))
+        self.v["conn_mode"].trace_add("write", lambda *a: (self.manual_close(), self.apply_lock()))
+
+    def board_link(self, mode=None):
+        """Параметры подключения к плате для выбранного способа -> (kwargs для MK201, текст)."""
+        mode = mode or self.v["conn_mode"].get()
+        if mode == "Modbus TCP":
+            ip = self.v["tcp_ip"].get().strip()
+            if not ip:
+                raise RuntimeError("Не задан IP платы (вкладка «Подключение», Modbus TCP)")
+            kw = dict(host=ip, tcp_port=int(self.v["tcp_port"].get() or 502), unit=int(self.v["tcp_unit"].get() or 1),
+                      timeout=float(self.S.get("eth_timeout", 2.0)))
+            return kw, f"Modbus TCP {ip}:{kw['tcp_port']}, адрес {kw['unit']}"
+        if mode == "Modbus RTU":
+            p = self.port("rs485_port")
+            if not p:
+                raise RuntimeError("Не выбран «Переходник USB-RS485» на вкладке «Подключение»")
+            kw = dict(port=p, baud=int(self.v["rtu_baud"].get() or 19200), unit=int(self.v["rtu_unit"].get() or 1),
+                      parity=(self.v["rtu_parity"].get() or "N")[:1], stopbits=int(self.v["rtu_stop"].get() or 1))
+            return kw, f"Modbus RTU {p}, {kw['baud']} бод, 8{kw['parity']}{kw['stopbits']}, адрес {kw['unit']}"
+        if not self.port("port"):
+            raise RuntimeError("Не выбран порт платы")
+        kw = dict(port=self.port("port"), baud=int(self.v["baud"].get()), unit=int(self.v["unit"].get()))
+        return kw, f"Service Port {kw['port']}"
+
+    def link_cfg(self):
+        """Настройки RTU/TCP для сценария (шаги «Ethernet» и «RS-485 1–3»)."""
+        return dict(conn_mode=self.v["conn_mode"].get(), tcp_ip=self.v["tcp_ip"].get().strip(),
+                    tcp_port=self.v["tcp_port"].get(), tcp_unit=self.v["tcp_unit"].get(), rtu_baud=self.v["rtu_baud"].get(),
+                    rtu_parity=self.v["rtu_parity"].get(), rtu_stop=self.v["rtu_stop"].get(), rtu_unit=self.v["rtu_unit"].get())
+
+    def test_link(self, mode):
+        """«Проверить связь»: подключиться выбранным способом, прочитать серийный, MAC, дату и время."""
+        if self.running or self.flashing or self.connecting:
+            return
+        try:
+            kw, text = self.board_link(mode)
+        except Exception as e:
+            messagebox.showwarning("Связь с платой", str(e)); return
+        if mode == "Modbus RTU" or self.v["conn_mode"].get() == mode:
+            self.manual_close()                    # тот же порт / то же подключение может держать ручной режим
+        def job():
+            log = self.ui.log
+            log(f"Проверка связи: {text}…")
+            try:
+                d = MK201(trace=self.trace, **kw)
+                try:
+                    sn, mac, t = d.serial_read(), d.mac_read(), d.datetime_read()
+                finally:
+                    d.close()
+                y, mo, dd, h, mi, s_ = t
+                log(f"{text}: на связи — серийный {sn}, MAC {mac}, время {dd:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s_:02d}", "ok")
+            except Exception as e:
+                log(f"{text}: нет связи — {type(e).__name__}: {e}", "err")
+        threading.Thread(target=job, daemon=True).start()
 
     def path_row(self, parent, row, label, key, kind):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
@@ -616,6 +749,22 @@ class App(ManualMixin):
         t.tag_configure("ao", background="#f3f6fb")
         t.pack(anchor="w")
         return t
+
+    def restore_tables(self, r):
+        """Повтор: таблица AI/AO пустая (программу перезапускали) — заполнить замерами прошлого прогона из .json."""
+        tol = float(self.S["tol"])
+        for kind, n in (("ai", 8), ("ao", 2)):
+            data = r.get(kind)
+            if isinstance(data, dict):
+                data = [data.get(str(c), data.get(c)) for c in range(n)]
+            for ch in range(n):
+                try:
+                    vals = [float(v) for v in data[ch]]
+                except (TypeError, ValueError, IndexError, KeyError):
+                    continue
+                for i, v in enumerate(vals[:len(DEF_SP)]):
+                    sp = float(DEF_SP[i])
+                    self.set_point(kind, ch, i, sp, v, abs((v - sp) * 100 / 16) <= tol)
 
     def reset_tables(self):
         self.bad = {"ai": [False] * 8, "ao": [False] * 2}
@@ -1037,6 +1186,11 @@ class App(ManualMixin):
 
     def _check_board_link(self, bp):
         a = self.root.after; log = self.ui.log
+        if self.v["conn_mode"].get() != "Service Port":       # плата по RS-485 или Ethernet
+            try:
+                _, bp = self.board_link()
+            except Exception as e:
+                a(0, self.set_dot, "board", "err", "не настроено"); log(f"Плата: {e}", "err"); return
         if not bp:
             a(0, self.set_dot, "board", "err", "порт не найден"); log("Плата: порт не найден — выберите его вручную", "err"); return
         try:
@@ -1182,9 +1336,8 @@ class App(ManualMixin):
         self.manual_enable(not (self.locked or busy))
 
     def _board(self):
-        if not self.port("port"):
-            raise RuntimeError("Не выбран порт платы")
-        return MK201(self.port("port"), int(self.v["baud"].get()), int(self.v["unit"].get()), trace=self.trace)
+        kw, _ = self.board_link()
+        return MK201(trace=self.trace, **kw)
 
     def check_board(self):
         self.manual_close()
@@ -1248,6 +1401,9 @@ class App(ManualMixin):
     # ================= обновление ПО (отдельная кнопка, не шаг проверки) =================
     def flash(self):
         if self.locked or self.running or self.flashing: return
+        if self.v["conn_mode"].get() != "Service Port":
+            messagebox.showwarning("MK201 Auto", "Загрузка ПО — только через Service Port.\n"
+                                   "Выберите «Service Port» в «Связь с платой» на вкладке «Подключение»."); return
         path = self.v["hex_path"].get().strip()
         if not os.path.isfile(path):
             messagebox.showwarning("MK201 Auto", "Выберите файл ПО (.hex)"); return
@@ -1416,8 +1572,28 @@ class App(ManualMixin):
         self.retry_mode = bool(only)              # «Повторить непройденные»: AI/AO — только каналы вне допуска
         self.running = True; self.apply_lock()
         self.save(); self.ui.stopped = False; self.ui.skip = False
-        for k in self.step_lbl: self.set_step(k, "wait" if k in self.run_steps else "skip")
-        self.reset_tables(); self.bar["value"] = 0; self.set_timer(None)
+        if only:
+            # 02.11.2026: повтор непройденных — прошедшие шаги и галочки в таблицах остаются,
+            # меняется только то, что перепроверяется
+            num = self.failed_steps()[0] or "без_номера"
+            _, info = self.today_protocol(num)
+            r = info.get("results", {})
+            prev = r.get("steps_all") or r.get("steps") or {}
+            for k in self.step_lbl:
+                self.set_step(k, "wait" if k in self.run_steps else prev.get(k, "skip"))
+            if getattr(self, "table_num", None) != num:     # в таблицах другая плата (или пусто) — из протокола
+                self.reset_tables()
+                self.restore_tables(r)
+            self.table_num = num
+        else:
+            for k in self.step_lbl: self.set_step(k, "wait" if k in self.run_steps else "skip")
+            self.reset_tables()
+            try:
+                code = self.v["protocol_number"].get().strip()
+                self.table_num = parse_label(code, self.S["proto_prefix"])[0] if code else "без_номера"
+            except LabelError:
+                self.table_num = None
+        self.bar["value"] = 0; self.set_timer(None)
         self.stop_btn.config(state="normal"); self.btn_open.config(state="disabled")
         self.set_chip("Выполняется…", C_ACCENT); self.set_phase("Подготовка")
         self.nb.select(self.tabs["check"])
@@ -1477,17 +1653,18 @@ class App(ManualMixin):
                     except Exception as e:
                         ui.log(f"Блок питания: не удалось включить CH1 ({e}) — питание платы проверьте вручную", "warn")
                 # 29.10.2026: плата подключается первой и сама по себе — остальные приборы её не блокируют
-                bp = self.port("port")
                 err = self.com_conflict()
                 if err:
                     raise RuntimeError(err + " (вкладка «Подключение»)")
-                if not bp:
-                    raise RuntimeError("Не выбран порт платы — выберите его на вкладке «Подключение»")
-                ui.log(f"Подключаюсь к плате {bp}…")
+                try:
+                    _, bp = self.board_link()
+                except Exception as e:
+                    raise RuntimeError(f"{e} — вкладка «Подключение»") from None
+                ui.log(f"Подключаюсь к плате: {bp}…")
                 try:
                     dev = self._board()
                 except Exception as e:
-                    raise RuntimeError(f"Порт платы {bp} не открылся: {e}") from None
+                    raise RuntimeError(f"Плата ({bp}) не подключилась: {e}") from None
                 rp, cp = self.port("relay_port"), self.port("cal_port")
                 if self.relay is not None:
                     try:
@@ -1534,7 +1711,7 @@ class App(ManualMixin):
                                         ("gen", self.gen, "генератор — настраивает и запускает оператор")):
                     if obj is None:
                         ui.log(f"Не подключён {what}", "warn")
-                self.root.after(0, self.set_dot, "board", "ok", f"на связи ({self.port('port')})")
+                self.root.after(0, self.set_dot, "board", "ok", f"на связи ({bp})")
             num = full or "без_номера"
             base, prev = self.today_protocol(num) if v["template"] else (None, {})
             folder = os.path.join(self.proto_root(), self.safe(num))
@@ -1548,7 +1725,7 @@ class App(ManualMixin):
                        protocol_number=num, out_path=out, operator=v["operator"],
                        ifaces={n: x.get() for n, x in self.iface.items()},
                        gen_method=v["gen_method"] or "burst", gen_trig=v["gen_trig"] or "C1:BTWV MTRIG",
-                       rs485_port="" if sim else self.port("rs485_port"), sim=sim, version=VERSION,
+                       rs485_port="" if sim else self.port("rs485_port"), sim=sim, version=VERSION, **self.link_cfg(),
                        unit=int(v["unit"] or 1), base_protocol=base, retry_bad=bool(getattr(self, "retry_mode", False)),
                        prev_steps=(prev.get("results", {}).get("steps_all") or prev.get("results", {}).get("steps") or {}),
                        prev_results=prev.get("results", {}))

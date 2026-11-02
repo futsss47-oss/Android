@@ -9,7 +9,7 @@ USB-COM (FT232), по нему идут те же Modbus RTU-кадры.
   * float и 32-битные числа — МЛАДШЕЕ слово первым (серийник в плате читался [A1C0, 77E9] = 2011800000);
   * «Информация о ПО» (0x51) приходит в little-endian (C4 A8 05 00 70 0D = 370884 байт, CRC 0D70).
 """
-import struct, time, serial
+import socket, struct, time, serial
 from modbus_decode import describe_request, describe_response
 
 FC_READ_HOLD, FC_WRITE_MULT = 0x03, 0x10
@@ -73,14 +73,109 @@ def hx(b):
     return " ".join(f"{x:02X}" for x in b)
 
 
+class TcpStream:
+    """Modbus TCP, как в конфигураторе (порт 502, заголовок MBAP), — под видом последовательного порта.
+    write() получает RTU-кадр (адрес + PDU + CRC), отправляет PDU в обёртке MBAP и принимает ответ целиком;
+    read() отдаёт ответ снова как RTU-кадр (адрес + PDU + CRC). Поэтому разбор ответов, идентификация,
+    «Команда вручную» и журнал обмена одинаковы для Service Port, RS-485 и Ethernet."""
+
+    def __init__(self, host, port=502, timeout=1.0):
+        self.host, self.port, self.timeout = host, int(port), timeout
+        self.sock, self.buf, self.tid = None, b"", 0
+        self.open()
+
+    def open(self):
+        self.close()
+        self.sock = socket.create_connection((self.host, self.port), timeout=max(self.timeout, 2.0))
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+    @property
+    def is_open(self):
+        return self.sock is not None
+
+    def close(self):
+        if self.sock is not None:
+            try: self.sock.close()
+            except OSError: pass
+        self.sock = None
+
+    def reset_input_buffer(self):
+        self.buf = b""
+
+    @property
+    def in_waiting(self):
+        return len(self.buf)
+
+    def _recv(self, n):
+        out = b""
+        while len(out) < n:
+            chunk = self.sock.recv(n - len(out))
+            if not chunk:
+                raise ConnectionError(f"{self.host}:{self.port}: соединение закрыто платой")
+            out += chunk
+        return out
+
+    def write(self, frame):
+        unit, pdu = frame[0], bytes(frame[1:-2])
+        self.tid = (self.tid + 1) & 0xFFFF
+        req = struct.pack(">HHHB", self.tid, 0, len(pdu) + 1, unit) + pdu
+        for attempt in (0, 1):                     # соединение оборвалось (плата перезагрузилась) — один раз заново
+            try:
+                if self.sock is None:
+                    self.open()
+                self.sock.settimeout(self.timeout)
+                self.sock.sendall(req)
+                break
+            except OSError:
+                self.close()
+                if attempt:
+                    raise
+        self.buf = b""
+        try:
+            while True:
+                head = self._recv(7)
+                tid, _, length, u = struct.unpack(">HHHB", head)
+                body = self._recv(length - 1)
+                if tid == self.tid:              # опоздавший ответ на прошлый запрос — пропускаем
+                    break
+        except socket.timeout:
+            return len(frame)                    # нет ответа: read() вернёт пусто — «НЕТ ОТВЕТА (таймаут)»
+        except OSError:
+            self.close()
+            return len(frame)
+        rtu = bytes([u]) + body
+        self.buf = rtu + struct.pack("<H", crc16(rtu))
+        return len(frame)
+
+    def read(self, n):
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+
 class MK201:
-    def __init__(self, port, baud=115200, unit=1, timeout=1.0, parity="N", stopbits=1, trace=None):
+    """Плата MK201. Связь — Service Port (USB-COM) или RS-485 через переходник (Modbus RTU),
+    либо Ethernet (Modbus TCP, host=IP). Команды одинаковые, как в конфигураторе."""
+
+    def __init__(self, port=None, baud=115200, unit=1, timeout=1.0, parity="N", stopbits=1, trace=None,
+                 host=None, tcp_port=502):
         self.unit, self.trace = unit, trace
-        self.ser = serial.Serial(port, baud, timeout=timeout, parity=parity, stopbits=stopbits)
+        if host:
+            self.ser = TcpStream(host, tcp_port, timeout)
+            self.link = f"Modbus TCP {host}:{tcp_port}, адрес {unit}"
+        else:
+            self.ser = serial.Serial(port, baud, timeout=timeout, parity=parity, stopbits=stopbits)
+            self.link = f"{port}, {baud} бод, 8{parity}{stopbits}, адрес {unit}"
+        self.is_tcp = bool(host)
         self.base_timeout = timeout
 
     def close(self):
         self.ser.close()
+
+    def reopen(self):
+        """Открыть заново то же подключение (после close() или обрыва)."""
+        try: self.ser.close()
+        except Exception: pass
+        self.ser.open()
 
     def set_timeout(self, t):
         self.ser.timeout = t

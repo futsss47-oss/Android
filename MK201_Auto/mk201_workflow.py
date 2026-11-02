@@ -587,111 +587,187 @@ class Runner:
             proto.set_current_consumption(ma, ok)
         return ok
 
-    # ---- шаг: Ethernet (Modbus TCP) ----
-    def board_ip(self):
-        ip = str(self.cfg.get("eth_ip") or "").strip()
-        if ip:
-            return ip
-        r = self.dev.ports_read()
-        return ".".join(str(x) for x in (r[0] & 255, r[0] >> 8, r[1] & 255, r[1] >> 8))
-
-    def step_eth(self, proto):
-        """Плата отвечает по Modbus TCP (тот же запрос чтения AI, функция 101) — интерфейс годен."""
-        ip, port = self.board_ip(), int(self.cfg.get("eth_port", 502))
-        tmo = float(self.cfg.get("eth_timeout", 2.0))
-        while not self.cfg.get("sim"):
-            self.chk()
-            self.detail(f"Modbus TCP {ip}:{port}")
-            try:
-                pdu = struct.pack(">BHH", 101, 1, 2)
-                req = struct.pack(">HHHB", 1, 0, len(pdu) + 1, int(self.cfg.get("unit", 1))) + pdu
-                with socket.create_connection((ip, port), timeout=tmo) as sk:
-                    sk.settimeout(tmo)
-                    sk.sendall(req)
-                    ans = sk.recv(260)
-                if len(ans) < 9 or ans[:2] != req[:2]:
-                    raise RuntimeError(f"непонятный ответ: {ans.hex(' ')}")
-                fc = ans[7]
-                self.log(f"[Ethernet] {ip}:{port} ответ получен (функция {fc & 0x7F}{', исключение' if fc & 0x80 else ''}) — OK")
-                state = "годен"
-                break
-            except Exception as e:
-                self.log(f"!!! [Ethernet] {ip}:{port}: нет ответа ({e})")
-                try:
-                    self.retry_or_skip(f"Плата не отвечает по Ethernet ({ip}:{port}).\n"
-                                       f"Проверьте сетевой кабель и что сетевая карта ПК в той же подсети "
-                                       f"(например, IP ПК {'.'.join(ip.split('.')[:3])}.100, маска 255.255.255.0).")
-                except StepSkip:
-                    state = "не годен"
-                    break
-        else:
-            self.log(f"[Ethernet] симулятор: {ip}:{port} — OK"); state = "годен"
-        self.results["ifaces"]["Ethernet 10/100 Base-T"] = state
-        self.hook("iface", "Ethernet 10/100 Base-T", state)
-        if proto:
-            proto.put_iface("Ethernet 10/100 Base-T", state)
-        return state == "годен"
-
-    # ---- шаг: RS-485 1–3 через переходник USB-RS485 ----
+    # ---- шаги: Ethernet (Modbus TCP) и RS-485 1–3 (Modbus RTU) — 02.11.2026 ----
+    # После CI: эталон читается через Service Port, Service Port отключается, плата читается по TCP,
+    # потом по RTU через переходник на каждой из трёх клемм RS-485. Совпало — интерфейс годен.
     RS485_PINS = {0: "XP10: A — конт. 3, B — конт. 2, общий — конт. 4",
                   1: "XP9: A — конт. 3, B — конт. 2, общий — конт. 4",
                   2: "XP9: A — конт. 7, B — конт. 6, общий — конт. 8"}
+    TIME_TOL = 5.0                            # с: время по сети должно совпасть с ПК или с Service Port
+
+    @staticmethod
+    def _offset(dev):
+        """Время платы минус время ПК, с (None — время платы не разобрать)."""
+        y, mo, d, h, mi, s = dev.datetime_read()
+        try:
+            return time.mktime((y, mo, d, h, mi, s, 0, 0, -1)) - time.time(), f"{d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
+        except (OverflowError, ValueError):
+            return None, f"{d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
+
+    def identity(self, dev):
+        off, text = self._offset(dev)
+        return {"sn": dev.serial_read(), "mac": dev.mac_read().upper(), "off": off, "time": text}
+
+    def reference(self):
+        """Эталон — то, что плата отдаёт через основное подключение (Service Port)."""
+        ref = self.identity(self.dev)
+        self.log(f"Эталон ({getattr(self.dev, 'link', 'Service Port')}): серийный {ref['sn']}, MAC {ref['mac']}, время {ref['time']}")
+        want = str(self.cfg.get("serial") or "").strip()
+        if want and want.isdigit() and int(want) != ref["sn"]:
+            self.note(f"серийный в плате {ref['sn']} не совпадает с номером с этикетки ({want}) — запустите шаг «Серийный № и MAC»")
+        return ref
+
+    def compare(self, name, ref, got):
+        """-> (годен, текст). Время: совпадает с ПК (±5 с) или с тем, что плата отдала через Service Port."""
+        bad = []
+        if got["sn"] != ref["sn"]:
+            bad.append(f"серийный {got['sn']} ≠ {ref['sn']}")
+        if got["mac"] != ref["mac"]:
+            bad.append(f"MAC {got['mac']} ≠ {ref['mac']}")
+        t_ok = got["off"] is not None and (abs(got["off"]) <= self.TIME_TOL or
+                                           (ref["off"] is not None and abs(got["off"] - ref["off"]) <= self.TIME_TOL))
+        if not t_ok:
+            bad.append(f"время {got['time']} не совпадает ни с ПК, ни с Service Port ({ref['time']})")
+        text = f"серийный {got['sn']}, MAC {got['mac']}, время {got['time']}"
+        if got["off"] is not None and abs(got["off"]) > self.TIME_TOL and t_ok:
+            text += f" (с ПК расходится на {got['off']:+.0f} с — как и через Service Port)"
+        return not bad, text + ("" if not bad else " — НЕ СОВПАЛО: " + "; ".join(bad))
+
+    def release_main(self):
+        """Отключиться от основного порта платы (Service Port), чтобы проверить другой интерфейс."""
+        if self.cfg.get("sim"):
+            return
+        try:
+            self.dev.close()
+            self.log(f"Основное подключение отключено ({getattr(self.dev, 'link', 'Service Port')})")
+        except Exception as e:
+            self.log(f"Основное подключение: не закрылось ({e})")
+
+    def restore_main(self):
+        if self.cfg.get("sim"):
+            return
+        last = None
+        for _ in range(5):
+            try:
+                self.dev.reopen()
+                self.log(f"Основное подключение снова открыто ({getattr(self.dev, 'link', 'Service Port')})")
+                return
+            except Exception as e:
+                last = e
+                time.sleep(1.0)
+        self.log(f"!!! Основное подключение не открылось заново: {last}")
+
+    def _iface(self, proto, name, state):
+        self.results["ifaces"][name] = state
+        self.hook("iface", name, state)
+        if proto:
+            proto.put_iface(name, state)
+
+    def _check_link(self, name, ref, open_dev, hint):
+        """Подключиться open_dev(), прочитать серийный/MAC/время, сравнить. Нет связи — «Повторить / Пропустить шаг»."""
+        while True:
+            self.chk()
+            try:
+                d = open_dev()
+                try:
+                    got = self.identity(d)
+                finally:
+                    if d is not self.dev:
+                        d.close()
+                ok, text = self.compare(name, ref, got)
+                self.log(f"[{name}] {text}" + (" — OK" if ok else ""))
+                if not ok:
+                    self.note(f"{name}: {text}")
+                return "годен" if ok else "не годен"
+            except (Abort, StepSkip):
+                raise
+            except Exception as e:
+                self.log(f"!!! [{name}] нет связи: {type(e).__name__}: {e}")
+                try:
+                    self.retry_or_skip(f"{name}: плата не отвечает.\n{hint}")
+                except StepSkip:
+                    return "не годен"
+
+    def step_eth(self, proto):
+        ip = str(self.cfg.get("tcp_ip") or "10.155.26.140").strip()
+        port, unit = int(self.cfg.get("tcp_port", 502) or 502), int(self.cfg.get("tcp_unit", 1) or 1)
+        tmo = float(self.cfg.get("eth_timeout", 2.0))
+        name = "Ethernet 10/100 Base-T"
+        ref = self.reference()
+        hint = (f"Проверьте сетевой кабель и что сетевая карта ПК в той же подсети, что и плата {ip} "
+                f"(например, IP ПК {'.'.join(ip.split('.')[:3])}.100, маска 255.255.255.0).")
+        self.release_main()
+        try:
+            self.detail(f"Modbus TCP {ip}:{port}, адрес {unit}")
+            state = self._check_link(name, ref, (lambda: self.dev) if self.cfg.get("sim") else
+                                     (lambda: MK201(host=ip, tcp_port=port, unit=unit, timeout=tmo,
+                                                    trace=getattr(self.dev, "trace", None))), hint)
+        finally:
+            self.restore_main()
+        self._iface(proto, name, state)
+        return state == "годен"
 
     def step_rs485(self, proto):
-        port = self.cfg.get("rs485_port")
-        if self.cfg.get("sim"):
-            for p in range(3):
-                self.results["ifaces"][f"RS-485_{p + 1}"] = "годен"
-                self.hook("iface", f"RS-485_{p + 1}", "годен")
-                if proto:
-                    proto.put_iface(f"RS-485_{p + 1}", "годен")
-            self.log("[RS-485] симулятор: порты 1–3 — OK")
-            return True
-        if not port:
-            self.log("RS-485: переходник USB-RS485 не выбран — состояние портов берётся из ручного выбора (табл. 7)")
+        port = str(self.cfg.get("rs485_port") or "")
+        if not port and not self.cfg.get("sim"):
+            self.log("RS-485: переходник USB-RS485 не выбран на вкладке «Подключение» — состояние портов берётся "
+                     "из ручного выбора (табл. 7)")
             if proto:
                 for p in range(3):
                     st = (self.cfg.get("ifaces") or {}).get(f"RS-485_{p + 1}")
                     if st:
                         proto.put_iface(f"RS-485_{p + 1}", st)
             return "manual"
-        regs = self.dev.ports_read()
+        baud = int(self.cfg.get("rtu_baud", 19200) or 19200)
+        parity = str(self.cfg.get("rtu_parity", "N") or "N")[:1].upper()
+        stop = int(float(self.cfg.get("rtu_stop", 1) or 1))
+        unit = int(self.cfg.get("rtu_unit", 1) or 1)
+        ref = self.reference()
+        try:                                   # настройки портов в самой плате — запасной вариант и подсказка
+            regs = self.dev.ports_read()
+        except Exception:
+            regs = None
+        self.release_main()
         ok_all = True
-        for p in range(3):
-            q = regs[8 + 6 * p: 14 + 6 * p]
-            addr, mode = q[0] & 255, q[1]
-            baud = BAUDS.get(q[3], 115200)
-            parity = {0: "N", 1: "O", 2: "E"}.get(q[4], "N")
-            stop = {0: 1, 1: 1.5, 2: 2}.get(q[5], 1)
-            name = f"RS-485_{p + 1}"
-            if mode != 2:
-                self.log(f"!!! [{name}] порт не в режиме MbSlave (режим {mode}) — проверка может не пройти; запустите шаг «Порты»")
-            self.need(f"Подключите переходник USB-RS485 к порту RS-485 {p + 1}\n({self.RS485_PINS[p]}).")
-            state = "не годен"
-            while True:
-                self.chk()
-                self.detail(f"{name}: {port}, {baud} бод, {parity}, стоп {stop}, адрес {addr}")
-                try:
-                    d = MK201(port, baud, addr, timeout=1.0, parity=parity, stopbits=stop, trace=getattr(self.dev, "trace", None))
+        try:
+            for p in range(3):
+                name = f"RS-485_{p + 1}"
+                alt = None
+                if regs:
+                    q = regs[8 + 6 * p: 14 + 6 * p]
+                    if q[1] != 2:
+                        self.log(f"!!! [{name}] в плате порт не в режиме MbSlave (режим {q[1]}) — проверка может не пройти; "
+                                 "запустите шаг «Порты 1–3»")
+                    alt = (BAUDS.get(q[3], baud), {0: "N", 1: "O", 2: "E"}.get(q[4], "N"), {0: 1, 2: 2}.get(q[5], 1), q[0] & 255 or unit)
+                    if alt == (baud, parity, stop, unit):
+                        alt = None
+                self.need((f"Подключите переходник USB-RS485 к клемме RS-485 {p + 1}" if p == 0 else
+                           f"Переключите переходник USB-RS485 на клемму RS-485 {p + 1}") + f"\n({self.RS485_PINS[p]}).")
+                self.detail(f"{name}: {port}, {baud} бод, 8{parity}{stop}, адрес {unit}")
+
+                def open_dev(alt=alt):
+                    if self.cfg.get("sim"):
+                        return self.dev
+                    tr = getattr(self.dev, "trace", None)
                     try:
-                        v = d.ai_ma()[0]
-                    finally:
-                        d.close()
-                    self.log(f"[{name}] плата ответила через переходник ({baud} бод, адрес {addr}), AI0 = {v:.3f} мА — OK")
-                    state = "годен"
-                    break
-                except Exception as e:
-                    self.log(f"!!! [{name}] нет ответа через переходник: {e}")
-                    try:
-                        self.retry_or_skip(f"{name}: плата не отвечает через переходник.\n"
-                                           f"Проверьте подключение ({self.RS485_PINS[p]}) и полярность A/B.")
-                    except StepSkip:
-                        break
-            ok_all = ok_all and state == "годен"
-            self.results["ifaces"][name] = state
-            self.hook("iface", name, state)
-            if proto:
-                proto.put_iface(name, state)
+                        d = MK201(port, baud, unit, timeout=1.0, parity=parity, stopbits=stop, trace=tr)
+                        d.serial_read()
+                        return d
+                    except Exception as e:
+                        try: d.close()
+                        except Exception: pass
+                        if not alt:
+                            raise
+                        self.log(f"[RS-485] с настройками вкладки «Подключение» нет ответа ({e}) — пробую настройки "
+                                 f"порта из платы: {alt[0]} бод, 8{alt[1]}{alt[2]}, адрес {alt[3]}")
+                        return MK201(port, alt[0], alt[3], timeout=1.0, parity=alt[1], stopbits=alt[2], trace=tr)
+                state = self._check_link(name, ref, open_dev,
+                                         f"Проверьте подключение ({self.RS485_PINS[p]}), полярность A/B и настройки RTU "
+                                         f"на вкладке «Подключение» ({baud} бод, 8{parity}{stop}, адрес {unit}).")
+                ok_all = ok_all and state == "годен"
+                self._iface(proto, name, state)
+        finally:
+            self.restore_main()
         return ok_all
 
     # ---- шаг: проверка DO -> DI (петля на самой плате) ----
@@ -1016,7 +1092,7 @@ class Runner:
     TABLE = [("power", "Ток и мощность потребления"), ("ports", "Настройка портов"), ("time", "Дата и время"),
              ("serial", "Серийный номер и MAC"), ("ai_cal", "Калибровка AI"), ("ai_check", "Проверка AI"),
              ("ao_cal", "Калибровка AO"), ("ao_check", "Проверка AO"), ("dio", "Проверка DO → DI"),
-             ("ci", "Счётные входы CI"), ("eth", "Ethernet"), ("rs485", "RS-485 1–3")]
+             ("ci", "Счётные входы CI"), ("eth", "Ethernet (Modbus TCP)"), ("rs485", "RS-485 1–3 (Modbus RTU)")]
 
     def run(self, steps):
         base = self.cfg.get("base_protocol") or self.cfg.get("template")
