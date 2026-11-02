@@ -729,36 +729,47 @@ private fun SessionRow(s: SessionEntity, now: LocalDateTime, onClick: () -> Unit
     val start = TimeConv.toLocal(s.startMillis)
     val end = s.endMillis?.let { TimeConv.toLocal(it) }
     val minutes = Duration.between(start, end ?: now).toMinutes().toInt().coerceAtLeast(0)
-    val (badge, color) = when {
-        end == null -> "идёт" to MaterialTheme.colorScheme.tertiaryContainer
-        s.manual -> "вручную" to MaterialTheme.colorScheme.secondaryContainer
-        s.edited -> "исправлена" to MaterialTheme.colorScheme.secondaryContainer
-        else -> "авто" to MaterialTheme.colorScheme.surfaceContainerHighest
+    // Статус — второй строкой мелким текстом: время записи не обрезается даже на узком экране.
+    // Цвет есть только у идущей записи (охра с точкой), остальные статусы нейтральные.
+    val running = end == null
+    val badge = when {
+        running -> "идёт"
+        s.manual -> "вручную"
+        s.edited -> "исправлена"
+        else -> "авто"
     }
     val endText = when {
         end == null -> "сейчас"
         end.toLocalDate() == start.toLocalDate() -> end.format(TIME_FMT)
         else -> shortDateTime(end)
     }
+    val statusColor = if (running) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         Modifier
             .fillMaxWidth()
             .clip(BUTTON_SHAPE)
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp, horizontal = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${shortDateTime(start)} – $endText",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(end = 8.dp),
             )
-            Pill(badge, color)
-            Spacer(Modifier.width(8.dp))
             Text(clockDuration(minutes), style = MaterialTheme.typography.titleSmall, maxLines = 1, softWrap = false)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (running) StatusDot(Brand.Signal)
+            Text(
+                badge,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (running) FontWeight.SemiBold else null,
+                color = statusColor,
+            )
         }
         val note = s.note
         if (!note.isNullOrBlank()) {
