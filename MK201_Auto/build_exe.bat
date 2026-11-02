@@ -1,5 +1,8 @@
 @echo off
-rem Сборка MK201 Auto в один exe (Windows). Запускать из папки с mk201_auto.py.
+rem Сборка MK201 Auto (Windows). Запускать из папки с mk201_auto.py.
+rem 02.11.2026: сборка ПАПКОЙ (--onedir), а не одним файлом. Один файл при каждом запуске распаковывается
+rem во временную папку %TEMP%\_MEI...; без прав администратора (или когда антивирус это запрещает)
+rem выходило "Could not create temporary directory!". Программе-папке временный каталог не нужен.
 cd /d "%~dp0"
 
 set PY=py
@@ -16,7 +19,7 @@ rem Старые файлы с прежними именами удаляем, чтобы не путались.
 for %%f in (workflow settings stats labels ports relay firmware instruments simulator fallback) do if exist %%f.py del /q %%f.py
 if exist __pycache__ rmdir /s /q __pycache__
 if exist build rmdir /s /q build
-%PY% -m PyInstaller --noconfirm --clean --onefile --windowed --name MK201_Auto ^
+%PY% -m PyInstaller --noconfirm --clean --onedir --windowed --name MK201_Auto --distpath dist ^
   --collect-submodules pyvisa ^
   --hidden-import serial.tools.list_ports ^
   --hidden-import openpyxl ^
@@ -25,16 +28,24 @@ if exist build rmdir /s /q build
 if errorlevel 1 goto err
 
 echo.
-echo === 3/3 Копирую exe в эту папку ===
-rem exe кладём рядом с mk201_auto.json: настройки, журналы (logs) и операторы останутся те же
-copy /y "dist\MK201_Auto.exe" "MK201_Auto.exe" >nul
-if errorlevel 1 goto err
+echo === 3/3 Папка программы: %CD%\MK201_Auto_app ===
+rem Готовая программа - папка MK201_Auto_app (MK201_Auto.exe + _internal). Настройки mk201_auto.json и журналы
+rem лежат рядом с exe; при первой сборке настройки копируются из этой папки.
+if not exist MK201_Auto_app mkdir MK201_Auto_app
+robocopy "dist\MK201_Auto" MK201_Auto_app /E /NFL /NDL /NJH /NJS /NP >nul
+if errorlevel 8 goto err
+if exist mk201_auto.json if not exist MK201_Auto_app\mk201_auto.json copy /y mk201_auto.json MK201_Auto_app\ >nul
+if exist mk201_fw_lock.json if not exist MK201_Auto_app\mk201_fw_lock.json copy /y mk201_fw_lock.json MK201_Auto_app\ >nul
+rem старый однофайловый exe больше не нужен - запускайте MK201_Auto_app\MK201_Auto.exe
+if exist MK201_Auto.exe del /q MK201_Auto.exe
 if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
 if exist MK201_Auto.spec del /q MK201_Auto.spec
 
 echo.
-echo Готово: %CD%\MK201_Auto.exe
-echo (копия лежит в папке dist)
+echo Готово: %CD%\MK201_Auto_app\MK201_Auto.exe
+echo Запускать можно без администратора. Ярлык на рабочий стол - на этот exe.
+echo На другой ПК переносить всю папку MK201_Auto_app целиком.
 pause
 exit /b 0
 
