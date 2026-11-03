@@ -126,11 +126,27 @@ class Runner:
         regs = self.dev.ports_read()
         self.log("Сейчас в плате: " + interpret(1010, regs))
         mode = int(self.cfg.get("port_mode_value", 2))       # значение «MbSlave» — уточнить перехватом
+        # 03.11.2026 (1.32): скорость, чётность, стоп и адрес — как в «Связь с платой → Modbus RTU» (по умолч. 19200 8N1,
+        # адрес 1), у всех трёх портов одинаково. Раньше менялись только режим и мастер: порты 2 и 3 оставались на
+        # 115200, и проверка RS-485 на этих клеммах не отвечала с первого раза.
+        baud = int(self.cfg.get("rtu_baud", 19200) or 19200)
+        code = {v: k for k, v in BAUDS.items()}.get(baud)
+        if code is None:
+            self.log(f"!!! Скорость {baud} бод платой не поддерживается — ставлю 19200")
+            baud, code = 19200, 7
+        par = {"N": 0, "O": 1, "E": 2}.get(str(self.cfg.get("rtu_parity", "N") or "N")[:1].upper(), 0)
+        stop = {1: 0, 2: 2}.get(int(float(self.cfg.get("rtu_stop", 1) or 1)), 0)
+        addr = int(self.cfg.get("rtu_unit", 1) or 1)
         new = list(regs)
-        for i in range(3):                       # Порт1..3 = MbSlave Master0..2
+        for i in range(3):                       # Порт1..3 = MbSlave Master0..2, скорость/чётность/стоп/адрес из RTU
             base = 8 + 6 * i
+            new[base] = (regs[base] & 0xFF00) | addr
             new[base + 1] = mode
             new[base + 2] = i
+            new[base + 3] = code
+            new[base + 4] = par
+            new[base + 5] = stop
+        self.log(f"Порты 1–3: MbSlave, мастер 0–2, {baud} бод, 8{'NOE'[par]}{2 if stop == 2 else 1}, адрес {addr}")
         self.log("Записываю:        " + interpret(1010, new))
         self.dev.ports_write(new)
         time.sleep(0.3)
