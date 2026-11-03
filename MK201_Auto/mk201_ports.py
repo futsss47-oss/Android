@@ -57,7 +57,7 @@ def is_bluetooth(p):
     return "BLUETOOTH" in d or "BTHENUM" in d
 
 
-def find_board(exclude=(), prefer="", log=lambda s: None, baud=115200):
+def find_board(exclude=(), prefer="", log=lambda s: None, baud=115200, stop=lambda: False):
     """02.11.2026: у каждой новой платы Service Port получает новый COM (свой серийник FT232).
     Ищем плату: сначала prefer (порт из списка), потом порты FTDI, потом остальные; пропускаем exclude
     (порты других приборов) и переходники MOXA (через RS-485 плата тоже ответит — но это не Service Port).
@@ -68,6 +68,9 @@ def find_board(exclude=(), prefer="", log=lambda s: None, baud=115200):
              and not is_bluetooth(p)]
     ports.sort(key=lambda p: (p.device != prefer, p.vid != FTDI_VID))
     for p in ports:
+        if stop():
+            log("Время на подключение вышло — поиск платы остановлен")
+            break
         if p.device != prefer:
             log(f"Ищу плату: {p.device} ({p.description})…")
         if probe_board(p.device, baud):
@@ -117,7 +120,7 @@ def quick_check(saved, log=lambda s: None):
     return out
 
 
-def autodetect(log=lambda s: None, busy=(), known=None):
+def autodetect(log=lambda s: None, busy=(), known=None, stop=lambda: False):
     """-> {'board': порт|None, 'relay': ..., 'cal': ..., 'scanner': ...}. busy — открытые нами порты (не трогать),
     known — уже найденное (эти порты и роли не проверяются повторно)."""
     found = {"board": None, "relay": None, "cal": None, "scanner": None, "rs485": None}
@@ -137,6 +140,8 @@ def autodetect(log=lambda s: None, busy=(), known=None):
         else:
             rest.append(p)
     for port in moxa:
+        if stop():
+            break
         if not found["cal"]:
             log(f"Проверяю {port} (MOXA) — калибратор CA71?…")
             if probe_ca71(port):
@@ -151,6 +156,9 @@ def autodetect(log=lambda s: None, busy=(), known=None):
     for p in rest:
         if all(found[k] for k in ("board", "relay", "cal")):
             break
+        if stop():
+            log("Время на подключение вышло — остальные порты не проверяю (приборы выберите вручную или «Автопоиск»)")
+            break
         d = (p.description or "").upper()
         order = [("relay", probe_relay), ("board", probe_board), ("cal", probe_ca71)] if "CH34" in d or "CP210" in d \
             else [("board", probe_board), ("cal", probe_ca71), ("relay", probe_relay)]
@@ -158,6 +166,8 @@ def autodetect(log=lambda s: None, busy=(), known=None):
         for name, fn in order:
             if found[name]:
                 continue
+            if stop():
+                break
             if fn(p.device):
                 found[name] = p.device
                 log(f"  {p.device}: {dict(board='плата MK201', relay='блок реле', cal='калибратор CA71')[name]}")

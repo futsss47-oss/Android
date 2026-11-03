@@ -1011,14 +1011,12 @@ class App(ManualMixin):
         if self.running or self.flashing or self.connecting:
             return
         self.add_log("Автоподключение: блок питания → питание платы → поиск COM-портов…", "head")
-        self.connecting = True; self.apply_lock()
-        threading.Thread(target=self._connect, kwargs=dict(auto=True), daemon=True).start()
+        self.begin_connect(auto=True)
 
     def autodetect(self):
         if self.running or self.flashing or self.connecting: return
         self.manual_close()
-        self.connecting = True; self.apply_lock()
-        threading.Thread(target=self._connect, kwargs=dict(auto=True), daemon=True).start()
+        self.begin_connect(auto=True)
 
     def com_conflict(self):
         """Один COM-порт выбран для двух приборов (номера COM поменялись) -> текст ошибки или ''."""
@@ -1038,8 +1036,7 @@ class App(ManualMixin):
             messagebox.showwarning("Подключение", err); return
         self.save()
         self.manual_close()
-        self.connecting = True; self.apply_lock()
-        threading.Thread(target=self._connect, daemon=True).start()
+        self.begin_connect(auto=False)
 
     def _pick_visa(self, res, name, auto):
         """Выбранный оператором прибор — всегда он (даже если ответ *IDN? незнакомый, 02.11.2026).
@@ -1138,6 +1135,8 @@ class App(ManualMixin):
             return True
         bp = self.port("port"); baud = int(self.v["baud"].get() or 115200)
         t0 = time.time(); lim = float(S["board_wait"])
+        if self.connecting:
+            lim = min(lim, max(2.0, self.conn_left() - 8))   # подключение ограничено по времени (1.30)
         while time.time() - t0 < lim:
             now = {p for p, _ in ports.list_ports()}
             if bp and bp in now and ports.probe_board(bp, baud):
@@ -1183,7 +1182,7 @@ class App(ManualMixin):
         if t.is_alive() or not box:
             if t.is_alive():
                 hung[what] = t
-                self.ui.log(f"{what}: нет ответа за {limit} с — продолжаю без этого (приборы — вручную)", "warn")
+                self.ui.log(f"{what}: нет ответа за {limit:.0f} с — продолжаю без этого (приборы — вручную)", "warn")
             return default
         return box[0]
 
@@ -1206,8 +1205,22 @@ class App(ManualMixin):
             finally: d.close()
         except Exception as e: a(0, self.set_dot, "board", "err"); log(f"Плата: {e}", "err")
 
-    def _connect(self, auto=False):
+    def begin_connect(self, auto):
+        """03.11.2026 (1.30): подключение укладывается в «Подключение: не дольше, с» (по умолч. 30 с) — дальше
+        порты не перебираются, ненайденные приборы — «вручную». Номер попытки: зависшая старая попытка,
+        когда очнётся, не снимет признак подключения у новой."""
+        self.conn_gen = getattr(self, "conn_gen", 0) + 1
+        self.conn_deadline = time.time() + float(self.S.get("connect_limit", 30))
+        self.connecting = True; self.apply_lock()
+        threading.Thread(target=self._connect, kwargs=dict(auto=auto, gen=self.conn_gen), daemon=True).start()
+
+    def conn_left(self):
+        """Сколько секунд осталось на подключение (0 — время вышло)."""
+        return max(0.0, getattr(self, "conn_deadline", 0) - time.time())
+
+    def _connect(self, auto=False, gen=None):
         a = self.root.after; log = self.ui.log
+        late = lambda: self.conn_left() <= 0
         try:
             if self.sim.get():
                 for n in ("board", "relay", "cal", "psu", "gen"): a(0, self.set_dot, n, "ok", "симулятор")
@@ -1216,9 +1229,10 @@ class App(ManualMixin):
                 log("Симулятор: оборудование не требуется", "ok"); return
             # 1) приборы VISA и питание платы
             # (VISA может «зависнуть» на приборе — тогда не ждём его и подключаем плату и COM-порты дальше)
-            res = self._timed(instruments.list_resources, 20, "поиск приборов VISA", [])
+            res = self._timed(instruments.list_resources, min(20, max(3, self.conn_left() * 0.3)), "поиск приборов VISA", [])
             a(0, self._apply_visa, res)
-            new_psu = self._timed(lambda: self._open_visa(res, auto), 25, "подключение блока питания и генератора", False)
+            new_psu = self._timed(lambda: self._open_visa(res, auto), min(25, max(3, self.conn_left() * 0.4)),
+                                  "подключение блока питания и генератора", False)
             if self.psu is not None and (new_psu or not self.board_power):
                 try:
                     self.power_board(True, wait=True)
@@ -1231,8 +1245,8 @@ class App(ManualMixin):
                 saved = {"board": self.port("port"), "relay": self.port("relay_port"), "cal": self.port("cal_port")}
                 known = ports.quick_check(saved, lambda t: log(t, "dim"))
                 if not all(known.get(k) for k in ("board", "relay", "cal")):
-                    log("Ищу остальные устройства по COM-портам…", "dim")
-                found = ports.autodetect(lambda t: log(t, "dim"), busy={self.port("rs485_port")} - {""}, known=known)
+                    log(f"Ищу остальные устройства по COM-портам (осталось {self.conn_left():.0f} с)…", "dim")
+                found = ports.autodetect(lambda t: log(t, "dim"), busy={self.port("rs485_port")} - {""}, known=known, stop=late)
                 def apply():
                     lst = dict(ports.list_ports())
                     miss = []
@@ -1291,6 +1305,8 @@ class App(ManualMixin):
             log(f"Подключение: {type(e).__name__}: {e}", "err")
         finally:
             def done():
+                if gen is not None and gen != getattr(self, "conn_gen", gen):
+                    return                           # это старая (зависшая) попытка — у новой свой признак
                 self.connecting = False; self.apply_lock()
             a(0, done)
 
@@ -1331,14 +1347,16 @@ class App(ManualMixin):
             self.ui.log(f"Не удалось записать файл блокировки: {e}", "err")
         self.locked = state
 
-    CONNECT_LIMIT = 150                              # с: дольше подключение не идёт — разблокировать кнопки
+    CONNECT_GRACE = 10                               # с сверх «Подключение: не дольше» — потом сторож
 
     def connect_watchdog(self):
         """03.11.2026 (1.29): поток подключения завис (порт не открывается, прибор не отвечает) — раньше кнопки
         «Подключить», «Автопоиск», «Обновить список» оставались неактивными до перезапуска программы."""
         t0 = getattr(self, "_conn_t0", None)
-        if self.connecting and t0 and time.time() - t0 > self.CONNECT_LIMIT:
-            self.add_log(f"!!! Подключение не закончилось за {self.CONNECT_LIMIT} с — кнопки разблокированы. "
+        limit = float(self.S.get("connect_limit", 30)) + self.CONNECT_GRACE
+        if self.connecting and t0 and time.time() - t0 > limit:
+            self.conn_gen = getattr(self, "conn_gen", 0) + 1     # зависшая попытка, очнувшись, ничего не снимет
+            self.add_log(f"!!! Подключение не закончилось за {limit:.0f} с — кнопки разблокированы. "
                          f"Последнее действие: «{getattr(self, '_last_msg', '')}». Пришлите файл журнала (папка logs)", "err")
             self.connecting = False
             self.apply_lock()
@@ -1387,7 +1405,8 @@ class App(ManualMixin):
         for o in (self.relay, self.cal):                 # открытые нами порты не трогаем
             exclude.add(getattr(o, "port", "") or "")
         found = ports.find_board(exclude=exclude - {""}, prefer=cur if cur in have else "",
-                                 log=lambda t: log(t, "dim"), baud=baud)
+                                 log=lambda t: log(t, "dim"), baud=baud,
+                                 stop=lambda: self.connecting and self.conn_left() <= 0)
         if not found:
             log("Плата не найдена ни на одном COM-порту — проверьте USB-кабель Service Port и питание платы", "err")
             return None
