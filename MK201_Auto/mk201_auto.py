@@ -25,7 +25,7 @@ def _check_deps():
 
 _check_deps()
 
-from mk201_proto import MK201
+from mk201_proto import MK201, BAUDS, PORT_MODES
 from mk201_relay import Relay, NoRelay
 from ca71 import CA71
 from mk201_workflow import Runner
@@ -645,7 +645,65 @@ class App(ManualMixin):
                 log(f"{text}: на связи — серийный {sn}, MAC {mac}, время {dd:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s_:02d}", "ok")
             except Exception as e:
                 log(f"{text}: нет связи — {type(e).__name__}: {e}", "err")
+                if mode == "Modbus RTU":
+                    self._rtu_diagnose(kw)
         threading.Thread(target=job, daemon=True).start()
+
+    def _rtu_diagnose(self, kw):
+        """03.11.2026 (1.31): по RTU плата молчит — читаем через Service Port настройки её портов RS-485, пишем их
+        в журнал и пробуем подключиться с ними. Подошло — подставляем в «Связь с платой». Чаще всего порт платы
+        не в режиме MbSlave либо у него другой адрес или скорость."""
+        log = self.ui.log
+        sp = self.port("port")
+        if not sp or sp == kw.get("port"):
+            log("RS-485: настройки портов платы прочитать не через что — нужен Service Port "
+                "(или посмотрите: Ручной режим → Системные настройки → Прочитать)", "warn"); return
+        try:
+            d = MK201(sp, int(self.v["baud"].get() or 115200), int(self.v["unit"].get() or 1), trace=self.trace)
+            try:
+                regs = d.ports_read()
+            finally:
+                d.close()
+        except Exception as e:
+            log(f"RS-485: через Service Port {sp} настройки портов платы не прочитать ({e})", "warn"); return
+        par = {0: "N", 1: "O", 2: "E"}
+        cands = []
+        for p in range(3):
+            q = regs[8 + 6 * p: 14 + 6 * p]
+            addr, mode = q[0] & 255, q[1]
+            baud, parity, stop = BAUDS.get(q[3]), par.get(q[4], "N"), {0: 1, 2: 2}.get(q[5], 1)
+            mname = PORT_MODES[mode] if 0 <= mode < len(PORT_MODES) else str(mode)
+            ok = mode == 2 and baud and addr
+            log(f"RS-485 порт {p + 1} в плате ({['XP10', 'XP9 конт. 1–5', 'XP9 конт. 6–10'][p]}): режим {mname}, адрес {addr}, "
+                f"{baud or 'скорость ?'} бод, 8{parity}{stop}" + ("" if ok else
+                "  ← не ответит: нужен режим MbSlave и адрес 1–247 (шаг «Порты 1–3» или Ручной режим → Системные настройки)"),
+                None if ok else "warn")
+            if ok and (baud, parity, stop, addr) not in cands:
+                cands.append((baud, parity, stop, addr))
+        for baud, parity, stop, addr in cands:
+            if (baud, parity, stop, addr) == (kw["baud"], kw["parity"], kw["stopbits"], kw["unit"]):
+                continue
+            try:
+                d = MK201(kw["port"], baud, addr, timeout=1.0, parity=parity, stopbits=stop, trace=self.trace)
+                try:
+                    sn = d.serial_read()
+                finally:
+                    d.close()
+            except Exception:
+                continue
+            log(f"RS-485: плата ответила на {baud} бод, 8{parity}{stop}, адрес {addr} (серийный {sn}) — "
+                "эти настройки подставлены в «Связь с платой»", "ok")
+            def put():
+                for k, v in (("rtu_baud", baud), ("rtu_parity", parity), ("rtu_stop", stop), ("rtu_unit", addr)):
+                    self.v[k].set(str(v))
+                self.save()
+            self.root.after(0, put)
+            return
+        if not cands:
+            log("RS-485: ни один порт платы не в режиме MbSlave — по RS-485 плата отвечать не будет", "err")
+        else:
+            log("RS-485: с настройками портов платы ответа тоже нет — проверьте, к какой клемме подключён MOXA, "
+                "провода A/B (попробуйте поменять местами) и режим MOXA RS-485 2W", "err")
 
     def path_row(self, parent, row, label, key, kind):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=4)
