@@ -239,8 +239,7 @@ class Protocol:
         self._title(ws, r, 1, NCOL, f"Таблица 6.5 – Проверка частотомера счетных входов (допуск ±{tol:g} % от 30 кГц = "
                                     f"±{FREQ_BASE * tol / 100:g} Гц)")
         self._hdr(ws, r + 1, 1, r + 2, 1, "№")
-        self._hdr(ws, r + 1, 2, r + 2, 2, "Задано,\nГц")
-        self._hdr(ws, r + 1, 3, r + 2, 3, "Сигнал")
+        self._hdr(ws, r + 1, 2, r + 2, 3, "Задано,\nГц")             # тип сигнала в протоколе не показываем
         groups = ((4, 5, 5), (6, 7, 7), (8, 10, 9), (11, 12, 12))       # колонки: измерено, погрешность (CI3: H:I + J)
         for ch, (cm, ce, _) in enumerate(groups):
             self._hdr(ws, r + 1, cm, r + 1, ce, f"Вход CI{ch + 1}")
@@ -254,10 +253,8 @@ class Protocol:
             rr = r + 3 + i
             self._height(ws, rr, ROW)
             ents = [self.d["cif"].get(f"{ch}:{i}") for ch in range(4)]
-            wave = next((e["wave"] for e in ents if e and e.get("wave")), "")
             self._cell(ws, rr, 1, i + 1)
-            self._cell(ws, rr, 2, f, fmt="0")
-            self._cell(ws, rr, 3, {"прямоугольник": "прямоуг."}.get(wave, wave), size=8)
+            self._merge(ws, rr, 2, rr, 3, f, fmt="0")
             errs = []
             for ch, (c1, c2, ce) in enumerate(spans):
                 e = ents[ch]
