@@ -287,7 +287,11 @@ class SettingsDialog(tk.Toplevel):
             for r, (key, label, default, typ, lo, hi) in enumerate(items):
                 ttk.Label(lf, text=label).grid(row=r, column=0, sticky="w", pady=2)
                 v = tk.StringVar(value=self.fmt(app.S.get(key, default)))
-                e = ttk.Entry(lf, textvariable=v, width=14); e.grid(row=r, column=1, sticky="w", padx=8, pady=2)
+                if key in SET.CHOICES:
+                    e = ttk.Combobox(lf, textvariable=v, values=list(SET.CHOICES[key]), width=14, state="readonly")
+                else:
+                    e = ttk.Entry(lf, textvariable=v, width=14)
+                e.grid(row=r, column=1, sticky="w", padx=8, pady=2)
                 ttk.Label(lf, text=f"по умолч.: {self.fmt(default) or '—'}", style="Muted.TLabel").grid(row=r, column=2, sticky="w")
                 ttk.Button(lf, text="↺", width=3, command=lambda v=v, d=default: v.set(self.fmt(d))).grid(row=r, column=3, padx=(6, 0))
                 self.vars[key], self.ent[key] = v, e

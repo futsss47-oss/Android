@@ -228,7 +228,8 @@ class SimGen:
     def freq(self, f): pass
     def query(self, cmd): return {"C1:BSWV?": "C1:BSWV WVTP,SINE,FRQ,10HZ,AMP,20V", "C1:BTWV?": "C1:BTWV STATE,ON,GATE_NCYC,NCYC,TRSR,MAN,TIME,300", "C1:OUTP?": "C1:OUTP ON,LOAD,HZ"}.get(cmd, "")
     def trigger(self, cmd="", ask=None, text=""): pass
-    def setup(self, amp=20.0): pass
+    def setup(self, amp=20.0, wave="SQUARE"): self.wave = wave
+    def set_wave(self, wave): self.wave = wave
     def sim_wire(self, want):
         w = self.w
         if want == "all":

@@ -202,6 +202,10 @@ class Generator(_Visa):
         n = str(name or "").strip().lower()
         return cls.WAVES.get(n, "SINE" if n.upper() == "SINE" else "SQUARE")
 
+    def set_wave(self, wave):
+        """Форма для следующих пакетов и непрерывного сигнала (команды уходят в prepare / continuous)."""
+        self.wave = self.wave_code(wave)
+
     def duty_for(self, freq):
         """Скважность прямоугольника, %: 60 на частотах выше 25 кГц (импульс ≥ 17 мкс), иначе 50. Синус — None."""
         if self.wave != "SQUARE":
@@ -243,6 +247,7 @@ class Generator(_Visa):
     def continuous(self, freq):
         """Непрерывный сигнал freq (для режима частотомера): Burst выкл, частота обычной командой."""
         self.write(f"{self.c}:BTWV STATE,OFF")
+        self.write(f"{self.c}:BSWV WVTP,{self.wave}")
         self.write(f"{self.c}:BSWV FRQ,{freq:g}")
         duty = self.duty_for(freq)
         if duty is not None:
@@ -311,6 +316,9 @@ class Generator(_Visa):
             if st.get("STATE") != "ON":
                 self.write(f"{self.c}:BTWV STATE,ON")
                 st = self.burst_state()
+            if str(st.get("WVTP", "")).upper() != self.wave:          # форма несущей пакета (1.33)
+                self.write(f"{self.c}:BTWV CARR,WVTP,{self.wave}")
+                st = self.burst_state()
             if not self._frq_ok(st, freq):
                 self.write(f"{self.c}:BTWV CARR,FRQ,{freq:g}")
             if duty is not None and st.get("WVTP", "SQUARE").upper() == "SQUARE" and not self._num_eq(st.get("DUTY"), duty):
@@ -321,7 +329,7 @@ class Generator(_Visa):
                     self.write(f"{self.c}:BTWV {k},{v}")
             st = self.burst_state()
             if (st.get("STATE") == "ON" and st.get("TRSR") == "MAN" and st.get("TIME") == str(int(count))
-                    and self._frq_ok(st, freq)):
+                    and self._frq_ok(st, freq) and str(st.get("WVTP", self.wave)).upper() == self.wave):
                 return st
             self.log(f"!! генератор не подтвердил пакет (попытка {attempt + 1}): {st}")
         raise RuntimeError(f"генератор не перешёл в режим пакета ({int(count)} имп., ручной запуск): {st}")
@@ -423,6 +431,15 @@ class ManualGen:
     def __init__(self, ask, log=None, margin=0.5):
         self.ask, self.log, self.margin = ask, log or (lambda s: None), float(margin)
         self.trig_ok = None
+        self.wave = "SQUARE"
+
+    def set_wave(self, wave):
+        self.wave = Generator.wave_code(wave)
+
+    def _form(self, freq):
+        if self.wave == "SINE":
+            return "синус"
+        return f"прямоугольник, скважность {60 if float(freq) > 25000 else 50} %"
 
     def setup(self, amp=20.0, wave="SQUARE"):
         form = "синус" if Generator.wave_code(wave) == "SINE" else "прямоугольник (скважность 50 %, на 30 кГц — 60 %)"
@@ -436,7 +453,8 @@ class ManualGen:
         while count % m:
             m += 1
         size = count // m
-        self.ask(f"Выставьте на генераторе: частота {freq:g} Гц, N Cycle = {size} импульсов. Ничего не запускайте.")
+        self.ask(f"Выставьте на генераторе: {self._form(freq)}, частота {freq:g} Гц, N Cycle = {size} импульсов. "
+                 "Ничего не запускайте.")
         if before:
             before()
         for k in range(1, m + 1):
@@ -446,7 +464,8 @@ class ManualGen:
             if progress: progress(k / m)
 
     def continuous(self, freq):
-        self.ask(f"Режим частотомера: на генераторе выключите Burst (непрерывный сигнал), частота {freq:g} Гц.")
+        self.ask(f"Режим частотомера: на генераторе выключите Burst (непрерывный сигнал), {self._form(freq)}, "
+                 f"частота {freq:g} Гц.")
 
     def stop_continuous(self):
         self.ask("Включите на генераторе снова Burst (N Cycle, Source Manual) — выход должен замолчать.")

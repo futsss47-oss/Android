@@ -46,7 +46,12 @@ GROUPS = [
         ("warm", "Прогрев перед калибровкой AI, мин", 10.0, float, 0, 120),
     ]),
     ("Генератор АКИП-3409/2", [
-        ("gen_amp", "Синус, размах Vpp (на входы напрямую)", 20.0, float, 1, 20),
+        ("gen_amp", "Размах сигнала, Vpp (на входы напрямую)", 20.0, float, 1, 20),
+        # 03.11.2026 (1.33): форма сигнала по точкам — счётчик и частотомер одной формой. Прямоугольник на 15 и 30 кГц
+        # не досчитывал (не хватает амплитуды), поэтому там по умолчанию синус.
+        ("ci_wave_1", "Форма сигнала, точка 1 (10 Гц)", "прямоугольник", str, None, None),
+        ("ci_wave_2", "Форма сигнала, точка 2 (15 кГц)", "синус", str, None, None),
+        ("ci_wave_3", "Форма сигнала, точка 3 (30 кГц)", "синус", str, None, None),
         ("gen_pause", "Пауза между командами, с", 0.6, float, 0, 5),
         ("gen_margin", "Запас после пакета, с", 0.5, float, 0, 10),
         ("gen_burst_max", "Импульсов в пакете, не более", 50000, int, 1, 1000000),
@@ -57,6 +62,8 @@ GROUPS = [
         ("eth_timeout", "Таймаут ответа по TCP, с", 2.0, float, 0.2, 30),
     ]),
 ]
+
+CHOICES = {k: ("прямоугольник", "синус") for k in ("ci_wave_1", "ci_wave_2", "ci_wave_3")}   # выпадающие списки
 
 DEFAULTS = {k: d for _, items in GROUPS for k, _, d, *_ in items}
 SPEC = {k: (t, lo, hi) for _, items in GROUPS for k, _, d, t, lo, hi in items}
@@ -80,6 +87,8 @@ def convert(key, text):
         v = str(text).strip()
         if key == "proto_prefix" and v and not v.isdigit():
             raise ValueError("только цифры")
+        if key in CHOICES and v not in CHOICES[key]:
+            raise ValueError("выберите из списка")
         return v
     try:
         v = t(float(str(text).strip().replace(",", ".")))

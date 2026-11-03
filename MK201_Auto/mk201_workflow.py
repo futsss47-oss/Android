@@ -994,6 +994,13 @@ class Runner:
             self.dev.ci_cfg_write(modes=[1, 1, 1, 1])
         return ok
 
+    CI_WAVES = ("прямоугольник", "синус", "синус")   # по умолчанию: 10 Гц, 15 кГц, 30 кГц
+
+    def ci_wave(self, i):
+        """Форма сигнала для точки i (0, 1, 2) из «Настроек»: прямоугольник на 10 Гц, синус на 15 и 30 кГц."""
+        i = min(i, 2)
+        return str(self.cfg.get(f"ci_wave_{i + 1}") or self.CI_WAVES[i])
+
     def ci_freq_all(self, pts, chans):
         """03.11.2026 (1.33): режим «Частотомер» — после всех точек счётчика на этой клемме: плата в режим 2,
         генератор непрерывно на каждой частоте точек, погрешность ≤ «Частотомер: допуск» (0,01 % от 30 кГц), обратно."""
@@ -1006,7 +1013,8 @@ class Runner:
             for i, (f, _) in enumerate(pts):
                 self.chk()
                 label = f"частотомер {i + 1}/{len(pts)}"
-                self.detail(f"{label}: {f:g} Гц, клемма {where}")
+                self.detail(f"{label}: {f:g} Гц, {self.ci_wave(i)}, клемма {where}")
+                self.gen.set_wave(self.ci_wave(i))
                 self.gen.continuous(f)
                 time.sleep(max(float(self.cfg.get("ci_freq_settle", 3.0)), 20.0 / f))
                 fr = self.dev.ci_freq()
@@ -1047,11 +1055,10 @@ class Runner:
         modes, period, bounce = self.dev.ci_cfg_read()
         self.log(f"Счётные входы: в плате режимы {list(modes)}")
         amp = float(self.cfg.get("gen_amp", 20))
-        wave = str(self.cfg.get("gen_wave") or "прямоугольник")
-        form = "синус" if wave.lower().startswith("син") or wave.upper() == "SINE" else "прямоугольник (скважность 50 %, на 30 кГц — 60 %)"
-        self.log(f"Генератор: {form} {amp:g} Vpp, смещение 0, Hi-Z, Burst · N Cycle · ручной запуск, выход вкл")
-        self.gen.setup(amp, wave)
         pts = proto.ci_points(0) if proto else [(10, 300), (15000, 450000), (30000, 900000)]
+        self.log("Генератор: " + "; ".join(f"{f:g} Гц — {self.ci_wave(i)}" for i, (f, _) in enumerate(pts))
+                 + f" (форма — в «Настройках»), {amp:g} Vpp, смещение 0, Hi-Z, Burst · N Cycle · ручной запуск, выход вкл")
+        self.gen.setup(amp, self.ci_wave(0))
         self.can_reset = True
         ok = True
         pairs = ((0, 1), (2, 3))
@@ -1085,6 +1092,7 @@ class Runner:
                     where = "клемма не определена" if p is None else f"клемма CI{pairs[p][0] + 1}+CI{pairs[p][1] + 1}"
                     self.detail(f"точка {label}: {f:g} Гц × {n} имп (≈ {n / f:.0f} с), {where}")
                     try:
+                        self.gen.set_wave(self.ci_wave(i))
                         cnts, start, got = self.ci_burst(f, n, label)
                     except RuntimeError as e:
                         self.log(f"!!! [CI {label}] {e}")

@@ -868,9 +868,13 @@ class ManualMixin:
                    lambda r: self.i_psu_lbl.configure(text="—" if r[0] is None else f"{r[0]:.3f} В, {r[1] * 1000:.1f} мА"))).pack(side="left", padx=(16, 4))
         self.i_psu_lbl = ttk.Label(r2, text="—", font=("Segoe UI", 11, "bold")); self.i_psu_lbl.pack(side="left", padx=6)
 
-        lf = ttk.LabelFrame(f, text="Генератор АКИП-3409/2, канал C1 (синус на счётные входы напрямую)", padding=10); lf.pack(fill="x")
+        lf = ttk.LabelFrame(f, text="Генератор АКИП-3409/2, канал C1 (на счётные входы напрямую)", padding=10); lf.pack(fill="x")
         r1 = ttk.Frame(lf); r1.pack(fill="x")
         self.i_f, self.i_n = tk.StringVar(value="10"), tk.StringVar(value="300")
+        self.i_wave = tk.StringVar(value="прямоугольник")         # 1.33: форма сигнала
+        ttk.Label(r1, text="Форма:").pack(side="left")
+        ttk.Combobox(r1, textvariable=self.i_wave, values=["прямоугольник", "синус"], width=14,
+                     state="readonly").pack(side="left", padx=(4, 10))
         ttk.Label(r1, text="Частота, Гц:").pack(side="left")
         ttk.Entry(r1, textvariable=self.i_f, width=9).pack(side="left", padx=4)
         ttk.Label(r1, text="Импульсов:").pack(side="left", padx=(10, 0))
@@ -907,15 +911,16 @@ class ManualMixin:
         self.ibg("psu", lambda p: p.set(v, a), lambda r: self.add_log(f"Блок питания: CH2 = {v:g} В, ограничение {a:g} А, выход включён"))
 
     def i_gen_setup(self):
-        amp = float(self.S["gen_amp"])
-        self.add_log(f"Генератор: настройка — синус {amp:g} Vpp, смещение 0, Hi-Z, Burst · N Cycle · Manual, выход вкл")
-        self.ibg("gen", lambda g: g.setup(amp), lambda r: self.add_log("Генератор: настройка отправлена — проверьте экран прибора"))
+        amp, wave = float(self.S["gen_amp"]), self.i_wave.get()
+        self.add_log(f"Генератор: настройка — {wave} {amp:g} Vpp, смещение 0, Hi-Z, Burst · N Cycle · Manual, выход вкл")
+        self.ibg("gen", lambda g: g.setup(amp, wave), lambda r: self.add_log("Генератор: настройка отправлена — проверьте экран прибора"))
 
     def i_gen_cont(self):
         fr = self._num(self.i_f, "частота")
         if fr is None: return
-        self.ibg("gen", lambda g: g.continuous(fr), lambda r: self.add_log(f"Генератор: непрерывный синус {fr:g} Гц "
-                 "(для режима «Частотомер»)"))
+        wave = self.i_wave.get()
+        self.ibg("gen", lambda g: (g.set_wave(wave), g.continuous(fr)),
+                 lambda r: self.add_log(f"Генератор: непрерывно {wave} {fr:g} Гц (для режима «Частотомер»)"))
 
     def i_gen_trig(self):
         cmd = self.v["gen_trig"].get()
@@ -929,8 +934,9 @@ class ManualMixin:
         if None in (fr, n): return
         method, mx = self.v["gen_method"].get() or "burst", int(self.S["gen_burst_max"])
         trig = self.v["gen_trig"].get() or "C1:BTWV MTRIG"
-        self.add_log(f"Генератор: пакет {int(n)} импульсов {fr:g} Гц (≈ {n / fr:.1f} с), способ {method}, запуск «{trig}»")
-        self.ibg("gen", lambda g: g.pulses(fr, int(n), burst_max=mx, method=method, trig=trig,
+        wave = self.i_wave.get()
+        self.add_log(f"Генератор: пакет {int(n)} импульсов {fr:g} Гц, {wave} (≈ {n / fr:.1f} с), способ {method}, запуск «{trig}»")
+        self.ibg("gen", lambda g: g.set_wave(wave) or g.pulses(fr, int(n), burst_max=mx, method=method, trig=trig,
                                           ask=lambda t: self.ui.confirm(t) or (_ for _ in ()).throw(RuntimeError("отменено"))),
                  lambda r: self.add_log("Генератор: пакет выдан"))
 
