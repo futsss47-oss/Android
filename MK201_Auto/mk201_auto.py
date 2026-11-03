@@ -817,6 +817,8 @@ class App(ManualMixin):
 
     # ================= обновление окна из потока =================
     def add_log(self, s, tag=None):
+        if tag not in ("tx", "rx"):
+            self._last_msg = s                       # для сторожа подключения: на чём остановилось
         if tag is None:
             if s.startswith("==="): tag = "head"
             elif s.startswith(("ОШИБКА", "!!!")) or any(m in s for m in ("НЕ СОВПАЛО", "ВНЕ ДОПУСКА", "ЗА ДОПУСК")): tag = "err"
@@ -1329,7 +1331,24 @@ class App(ManualMixin):
             self.ui.log(f"Не удалось записать файл блокировки: {e}", "err")
         self.locked = state
 
+    CONNECT_LIMIT = 150                              # с: дольше подключение не идёт — разблокировать кнопки
+
+    def connect_watchdog(self):
+        """03.11.2026 (1.29): поток подключения завис (порт не открывается, прибор не отвечает) — раньше кнопки
+        «Подключить», «Автопоиск», «Обновить список» оставались неактивными до перезапуска программы."""
+        t0 = getattr(self, "_conn_t0", None)
+        if self.connecting and t0 and time.time() - t0 > self.CONNECT_LIMIT:
+            self.add_log(f"!!! Подключение не закончилось за {self.CONNECT_LIMIT} с — кнопки разблокированы. "
+                         f"Последнее действие: «{getattr(self, '_last_msg', '')}». Пришлите файл журнала (папка logs)", "err")
+            self.connecting = False
+            self.apply_lock()
+
     def apply_lock(self):
+        if self.connecting:
+            if not getattr(self, "_conn_t0", None):
+                self._conn_t0 = time.time()
+        else:
+            self._conn_t0 = None
         busy = self.running or self.flashing or self.connecting
         if self.locked:
             self.lock_bar.pack(fill="x", padx=10, pady=(0, 6), after=self.lock_anchor)

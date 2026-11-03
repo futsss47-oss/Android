@@ -141,6 +141,10 @@ class ManualMixin:
                         fn(quiet=True)
         except Exception:
             pass
+        try:
+            self.connect_watchdog()
+        except Exception:
+            pass
         self.root.after(1000, self.poll)
 
     def note(self, parent, text):

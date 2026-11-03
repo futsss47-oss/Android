@@ -50,6 +50,13 @@ FTDI_VID = 0x0403                                 # Service Port платы — 
 MOXA_VID = 0x110A                                 # переходники MOXA UPort (RS-485) — плату на них не ищем
 
 
+def is_bluetooth(p):
+    """Порты Bluetooth («Стандартный последовательный порт по соединению Bluetooth»): открытие такого COM в Windows
+    может висеть десятки секунд — их не опрашиваем никогда."""
+    d = f"{p.description or ''} {getattr(p, 'hwid', '') or ''}".upper()
+    return "BLUETOOTH" in d or "BTHENUM" in d
+
+
 def find_board(exclude=(), prefer="", log=lambda s: None, baud=115200):
     """02.11.2026: у каждой новой платы Service Port получает новый COM (свой серийник FT232).
     Ищем плату: сначала prefer (порт из списка), потом порты FTDI, потом остальные; пропускаем exclude
@@ -57,7 +64,8 @@ def find_board(exclude=(), prefer="", log=lambda s: None, baud=115200):
     -> порт или None."""
     ex = {e.upper() for e in exclude if e}
     ports = [p for p in lp.comports() if p.device.upper() not in ex and p.vid != MOXA_VID
-             and "MOXA" not in (p.description or "").upper() and not (p.vid == SCANNER_VID and p.pid == SCANNER_PID)]
+             and "MOXA" not in (p.description or "").upper() and not (p.vid == SCANNER_VID and p.pid == SCANNER_PID)
+             and not is_bluetooth(p)]
     ports.sort(key=lambda p: (p.device != prefer, p.vid != FTDI_VID))
     for p in ports:
         if p.device != prefer:
@@ -124,7 +132,7 @@ def autodetect(log=lambda s: None, busy=(), known=None):
             # Плату на MOXA не ищем (через RS-485 она тоже ответит), CA71 — ищем; оставшийся порт MOXA — RS-485.
             if p.device not in busy:
                 moxa.append(p.device)
-        elif p.device in busy or all(found[k] for k in ("board", "relay", "cal")):
+        elif p.device in busy or all(found[k] for k in ("board", "relay", "cal")) or is_bluetooth(p):
             continue
         else:
             rest.append(p)
