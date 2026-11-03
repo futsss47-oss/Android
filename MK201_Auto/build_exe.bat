@@ -47,11 +47,18 @@ if exist dist rmdir /s /q dist
 if exist MK201_Auto.spec del /q MK201_Auto.spec
 if exist version_info.txt del /q version_info.txt
 echo MK201 Auto %VER%> MK201_Auto_app\VERSION.txt
+echo Запускать MK201_Auto.exe только из этой папки (рядом с _internal). На рабочий стол - ЯРЛЫК, не копию exe.>> MK201_Auto_app\VERSION.txt
+
+rem 03.11.2026 (1.28): exe работает только рядом с папкой _internal. Скопированный на рабочий стол exe
+rem падает с "Failed to load Python DLL ...\Desktop\_internal\python312.dll". Поэтому сами делаем ЯРЛЫК.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d=[Environment]::GetFolderPath('Desktop'); $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'MK201 Auto.lnk')); $s.TargetPath='%CD%\MK201_Auto_app\MK201_Auto.exe'; $s.WorkingDirectory='%CD%\MK201_Auto_app'; $s.Description='MK201 Auto %VER%'; $s.Save()" >nul 2>nul
+if errorlevel 1 (echo Ярлык на рабочем столе создать не удалось - создайте вручную: правый клик по exe - Отправить - Рабочий стол) else (echo На рабочем столе ярлык "MK201 Auto")
 
 echo.
 echo Готово: MK201 Auto %VER%
 echo %CD%\MK201_Auto_app\MK201_Auto.exe
-echo Запускать можно без администратора. Ярлык на рабочий стол - на этот exe.
+echo Запускать можно без администратора. Запуск - ярлыком "MK201 Auto" на рабочем столе.
+echo !!! Не копируйте MK201_Auto.exe отдельно - без папки _internal он не запустится.
 echo На другой ПК переносить всю папку MK201_Auto_app целиком.
 pause
 exit /b 0
