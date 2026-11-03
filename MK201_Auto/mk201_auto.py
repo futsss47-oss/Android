@@ -33,6 +33,7 @@ from mk201_simulator import make_sim, make_sim_instruments
 from modbus_decode import hx
 import mk201_firmware as firmware
 import mk201_ports as ports
+import mk201_macbook as macbook
 import mk201_instruments as instruments
 import mk201_settings as SET
 from mk201_labels import parse_label, LabelError
@@ -52,11 +53,12 @@ STEPS = [("power", "Ток и мощность потребления (CH1)"),
          ("ai_check", "Проверка AI (0…20 мА)"), ("ao_cal", "Калибровка AO (4 и 19 мА)"),
          ("ao_check", "Проверка AO (0…20 мА)"), ("dio", "Проверка DO → DI (5 / 11 / 24 / 30 В)"),
          ("ci", "Счётные входы CI (генератор, синус)"), ("eth", "Ethernet: серийный, MAC, время по Modbus TCP"),
-         ("rs485", "RS-485 1–3: то же по Modbus RTU (3 клеммы)")]
+         ("rs485", "RS-485 1–3: то же по Modbus RTU (3 клеммы)"),
+         ("finish", "Завершение: сброс счётчиков и Modbus off")]
 STEP_NAMES = dict(STEPS)
 STEP_DEFAULT_OFF = {"ci", "eth", "rs485"}
 DEF_SP = ["0", "4", "8", "12", "16", "20"]
-IFACES = Protocol.IFACES
+IFACES = ('CAN',)          # 03.11.2026 (1.34): вручную — только CAN; Ethernet, RS-485 1–3 и Service USB ставит сама проверка
 
 # ---- палитра как в МИБ252 (02.11.2026: тёмная шапка, карточки, цветные СТАРТ/Стоп) ----
 C_BG, C_PANEL, C_TEXT, C_MUTED = "#f4f6f9", "#ffffff", "#1f2328", "#6b7280"
@@ -346,7 +348,7 @@ class App(ManualMixin):
         self.S = SET.clean(raw)
         self.v = {k: tk.StringVar(value=str(c.get(k, d))) for k, d in dict(
             port="COM63", baud="115200", unit="1", relay_port="", cal_port="", serial="", mac="", hex_path="",
-            template="", outdir="", protocol_number="", hv="3.3", scan_port="", rs485_port="",
+            mac_book="", outdir="", protocol_number="", hv="3.3", scan_port="", rs485_port="",
             psu_res="", gen_res="", operator="", gen_method="burst", gen_trig="C1:BTWV MTRIG",
             # 02.11.2026: связь с платой — Service Port / Modbus RTU (RS-485) / Modbus TCP
             conn_mode="Service Port", rtu_baud="19200", rtu_parity="N", rtu_stop="1", rtu_unit="1",
@@ -381,6 +383,7 @@ class App(ManualMixin):
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(1000, self.poll)
         self.root.after(300, self.startup)
+        self.root.after(1500, self.mac_load)
 
     # ================= окно =================
     def build(self):
@@ -492,7 +495,7 @@ class App(ManualMixin):
     def _install_autosave(self):
         """Галочки и выборы сохраняются сразу (как в МИБ) — переживут перезапуск программы."""
         vs = list(self.steps.values()) + [self.force, self.sim, self.verbose] + list(self.auto.values())
-        vs += [self.v[k] for k in ("hv", "gen_method", "gen_trig", "operator", "template", "outdir", "hex_path")]
+        vs += [self.v[k] for k in ("hv", "gen_method", "gen_trig", "operator", "mac_book", "outdir", "hex_path")]
         for var in vs:
             var.trace_add("write", lambda *a: self.save_soon())
 
@@ -544,7 +547,8 @@ class App(ManualMixin):
 
         lf = ttk.LabelFrame(f, text="Протокол", padding=10); lf.pack(fill="x", pady=(0, 8))
         lf.columnconfigure(1, weight=1)
-        self.path_row(lf, 0, "Шаблон протокола (.xlsx):", "template", "xlsx")
+        self.path_row(lf, 0, "Журнал MAC-адресов (.xlsx):", "mac_book", "xlsx")
+        ttk.Button(lf, text="Обновить", command=lambda: self.mac_load(force=True)).grid(row=0, column=3, padx=(6, 0))
         self.path_row(lf, 1, "Папка протоколов:", "outdir", "dir")
         ttk.Button(lf, text="Открыть папку", command=self.open_outdir).grid(row=1, column=3, padx=(6, 0))
 
@@ -767,10 +771,12 @@ class App(ManualMixin):
         self.v["protocol_number"].trace_add("write", lambda *a: self.update_sn())
         ttk.Label(lf, text="MAC-адрес:").grid(row=2, column=0, sticky="w", pady=(6, 2))
         ttk.Entry(lf, textvariable=self.v["mac"], width=22).grid(row=2, column=1, columnspan=3, sticky="w", pady=(6, 2))
-        ttk.Label(lf, text="Оператор:").grid(row=3, column=0, sticky="w", pady=2)
+        self.mac_lbl = ttk.Label(lf, text="", style="Note.TLabel", wraplength=330)
+        self.mac_lbl.grid(row=3, column=0, columnspan=4, sticky="w")
+        ttk.Label(lf, text="Оператор:").grid(row=4, column=0, sticky="w", pady=2)
         self.oper_cb = ttk.Combobox(lf, textvariable=self.v["operator"], values=self.operators, width=22)
-        self.oper_cb.grid(row=3, column=1, columnspan=3, sticky="w", pady=2)
-        ob = ttk.Frame(lf); ob.grid(row=4, column=1, columnspan=3, sticky="w")
+        self.oper_cb.grid(row=4, column=1, columnspan=3, sticky="w", pady=2)
+        ob = ttk.Frame(lf); ob.grid(row=5, column=1, columnspan=3, sticky="w")
         ttk.Button(ob, text="Добавить", command=self.oper_add).pack(side="left")
         ttk.Button(ob, text="Удалить", command=self.oper_del).pack(side="left", padx=4)
         self.update_sn()
@@ -785,7 +791,7 @@ class App(ManualMixin):
         ttk.Button(sb, text="Все", command=lambda: [v.set(True) for v in self.steps.values()]).pack(side="left")
         ttk.Button(sb, text="Ничего", command=lambda: [v.set(False) for v in self.steps.values()]).pack(side="left", padx=4)
 
-        lf = ttk.LabelFrame(body, text="Интерфейсы, табл. 7", padding=(10, 6)); lf.pack(fill="x", pady=(0, 8), padx=(0, 4))
+        lf = ttk.LabelFrame(body, text="Интерфейсы, табл. 7 (вручную)", padding=(10, 6)); lf.pack(fill="x", pady=(0, 8), padx=(0, 4))
         for i, n in enumerate(IFACES):
             ttk.Label(lf, text=n).grid(row=i // 2, column=(i % 2) * 2, sticky="w", padx=(0, 4), pady=1)
             ttk.Combobox(lf, textvariable=self.iface[n], values=["годен", "не годен"], width=9,
@@ -1038,9 +1044,68 @@ class App(ManualMixin):
             full, model, sn = parse_label(code, self.S["proto_prefix"])
             self.v["serial"].set(str(sn))
             self.sn_lbl.configure(text=f"в плату — {sn} · в протокол — {full}", foreground=OK)
+            self.mac_apply(full)
         except LabelError as e:
             self.v["serial"].set("")
             self.sn_lbl.configure(text=str(e), foreground=ERR)
+            self.mac_lbl.configure(text="")
+
+    # ---- журнал MAC-адресов (1.34) ----
+    MAC_CACHE = os.path.join(APPDIR, "mk201_mac_cache.json")
+
+    def mac_load(self, force=False):
+        """Прочитать журнал MAC (книга Excel на сетевом диске) в фоне; потом подставить MAC для текущего номера."""
+        path = self.v["mac_book"].get().strip()
+        self._mac_state = "none"
+        if not path:
+            self.mac_lbl.configure(text="")
+            return
+        self._mac_state = "loading"
+        self.mac_lbl.configure(text="журнал MAC загружается…", foreground=C_MUTED)
+        def job():
+            S = self.S
+            try:
+                idx, st = macbook.load_index(path, S["mac_sheet"], S["mac_col_mac"], S["mac_col_sn"], self.MAC_CACHE,
+                                             force=force, log=lambda m: self.ui.log(m, "dim"))
+                self.mac_index, self._mac_state, self._mac_note = idx, "ok", st
+                self.ui.log(f"Журнал MAC: {len(idx)} выданных MAC ({st})", "ok" if "кэш от" not in st else "warn")
+            except Exception as e:
+                self.mac_index, self._mac_state, self._mac_note = {}, "err", f"{type(e).__name__}: {e}"
+                self.ui.log(f"Журнал MAC не прочитан: {type(e).__name__}: {e}", "warn")
+            self.root.after(0, self.update_sn)
+        threading.Thread(target=job, daemon=True).start()
+
+    def mac_apply(self, full):
+        """Для номера изделия full подставить MAC из журнала (ручной ввод не затираем). Вызывается из update_sn."""
+        st = getattr(self, "_mac_state", "none")
+        lbl = self.mac_lbl
+        if not self.v["mac_book"].get().strip():
+            lbl.configure(text=""); return
+        if st in ("loading", "none"):
+            lbl.configure(text="журнал MAC загружается…", foreground=C_MUTED); return
+        if st == "err":
+            lbl.configure(text=f"журнал MAC не прочитан — введите MAC вручную ({self._mac_note})", foreground=ERR); return
+        hit = macbook.lookup(getattr(self, "mac_index", {}), full)
+        cur = self.v["mac"].get().strip()
+        if hit:
+            mac, row = hit
+            if not cur or cur == getattr(self, "_mac_auto", None) or cur.upper() == mac:
+                self.v["mac"].set(mac)
+            self._mac_auto = mac
+            self.mac_src = f"журнал MAC, лист {self.S['mac_sheet']}, строка {row}"
+            if self.v["mac"].get().strip().upper() == mac:
+                lbl.configure(text=f"MAC из журнала (строка {row})", foreground=OK)
+            else:
+                lbl.configure(text=f"в журнале для этого номера MAC {mac} (строка {row}), а введён другой", foreground=WARN)
+        else:
+            self.mac_src = ""
+            if cur and cur == getattr(self, "_mac_auto", None):
+                self.v["mac"].set("")                  # остался MAC прошлого изделия — убрать
+            self._mac_auto = None
+            lbl.configure(text="номера нет в журнале MAC — введите MAC вручную", foreground=ERR)
+            if getattr(self, "_mac_warned", None) != full:
+                self._mac_warned = full
+                self.add_log(f"ВНИМАНИЕ: номера {full} нет в журнале MAC-адресов — введите MAC вручную", "warn")
 
     def on_scan(self, code):
         def apply():
@@ -1607,8 +1672,7 @@ class App(ManualMixin):
 
     # ================= протоколы: папка на номер, дописывание за день, журнал плат =================
     def proto_root(self):
-        t = self.v["template"].get().strip()
-        return self.v["outdir"].get().strip() or (os.path.dirname(t) if t else APPDIR)
+        return self.v["outdir"].get().strip() or APPDIR
 
     @staticmethod
     def safe(name):
@@ -1780,10 +1844,6 @@ class App(ManualMixin):
                 if not full:
                     raise ValueError("Не указан номер с этикетки — нечего писать в плату")
                 MK201.mac_to_regs(v["mac"])
-            if not os.path.isfile(v["template"]):
-                if {"power", "ai_check", "ao_check", "dio", "ci", "eth", "rs485"} & set(steps):
-                    raise ValueError("Не выбран шаблон протокола (.xlsx) на вкладке «Подключение»")
-                v["template"] = ""
             sim = self.sim.get()
             if sim:
                 dev, relay, cal = make_sim(); psu, gen = make_sim_instruments()
@@ -1856,13 +1916,16 @@ class App(ManualMixin):
                         ui.log(f"Не подключён {what}", "warn")
                 self.root.after(0, self.set_dot, "board", "ok", f"на связи ({bp})")
             num = full or "без_номера"
-            base, prev = self.today_protocol(num) if v["template"] else (None, {})
+            base, prev = self.today_protocol(num)
+            if base and "protocol_data" not in prev:       # протокол прежней версии (по шаблону) не дописываем — новый файл
+                base, prev = None, {}
             folder = os.path.join(self.proto_root(), self.safe(num))
             out = base or os.path.join(folder, f"Протокол_{self.safe(num)}_{time.strftime('%Y-%m-%d_%H%M%S')}.xlsx")
             if base:
                 ui.log(f"Сегодня по № {num} уже был прогон — результаты допишутся в {os.path.basename(base)}")
             cfg = dict(S)
-            cfg.update(serial=v["serial"], mac=v["mac"], template=v["template"], hv=v["hv"], hex_path=v["hex_path"],
+            cfg.update(serial=v["serial"], mac=v["mac"], mac_src=getattr(self, "mac_src", "") if getattr(self, "_mac_auto", None)
+                       and str(v["mac"]).upper() == self._mac_auto else "", hv=v["hv"], hex_path=v["hex_path"],
                        tol_percent=S["tol"], fw_force=self.force.get(),
                        warm_min=0 if sim else S["warm"], samples=2 if sim else S["samples"],
                        protocol_number=num, out_path=out, operator=v["operator"],
@@ -1871,11 +1934,12 @@ class App(ManualMixin):
                        rs485_port="" if sim else self.port("rs485_port"), sim=sim, version=VERSION, **self.link_cfg(),
                        unit=int(v["unit"] or 1), base_protocol=base, retry_bad=bool(getattr(self, "retry_mode", False)),
                        prev_steps=(prev.get("results", {}).get("steps_all") or prev.get("results", {}).get("steps") or {}),
-                       prev_results=prev.get("results", {}))
+                       prev_results=prev.get("results", {}), prev_protocol=prev.get("protocol_data"),
+                       svc_port=self.port("port"), svc_baud=int(v["baud"] or 115200), svc_unit=int(v["unit"] or 1))
             if sim:
                 cfg.update(ai_settle=0, ao_settle=0, reassert_settle=0, psu_settle=0, dio_on=0, dio_volt=0,
                            cal_settle=0, power_settle=0, relay_settle=0, gen_margin=0)
-            self.last_protocol = out if v["template"] else None
+            self.last_protocol = out
             if not sim and (self.gen is not None or self.psu is not None) and not self.ilock.acquire(timeout=2):
                 raise RuntimeError("Прибор занят командой из ручного режима (ждёт ответа). Подождите или переподключите приборы")
             try:
@@ -1883,10 +1947,8 @@ class App(ManualMixin):
             finally:
                 if not sim and (self.gen is not None or self.psu is not None):
                     self.ilock.release()
-                if v["template"]:
-                    self.last_protocol = cfg["out_path"]       # могло смениться, если файл был открыт в Excel
-            if v["template"]:
-                self.journal(cfg, res, steps)
+                self.last_protocol = cfg["out_path"]           # могло смениться, если файл был открыт в Excel
+            self.journal(cfg, res, steps)
             _, failed = self.failed_steps()
             if ui.stopped: fin = ("Остановлено", WARN); ui.log("ИТОГ: остановлено оператором")
             elif res["ok"] and not failed: fin = ("Готово — годен", OK); ui.log("ИТОГ: ГОДЕН")

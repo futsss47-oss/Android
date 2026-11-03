@@ -2,7 +2,7 @@
 
 Все обращения к плате идут в фоновом потоке через одно соединение (self.mdev) под замком self.mlock.
 Пока идёт автоматический прогон или запись ПО, ручной режим недоступен; соединение закрывается.
-Вкладки, отмеченные «не проверено сниффером», работают по адресам из exe конфигуратора."""
+Все вкладки проверены на плате (03.11.2026)."""
 import statistics, threading, time, tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -334,8 +334,7 @@ class ManualMixin:
         self.mbtn(bar, "Прочитать", self.m_sys_read, style="Accent.TButton").pack(side="left")
         self.mbtn(bar, "Записать в плату", self.m_sys_write).pack(side="left", padx=6)
         self.sys_star = ttk.Label(bar, text="", foreground=WARN); self.sys_star.pack(side="left", padx=10)
-        self.note(f, "Изменённые поля помечаются «*». Коды скорости и чётности — из exe конфигуратора (сниффером не проверены); "
-                     "порты 1–3 = MbSlave, Master 0–2 подтверждены автоматическим шагом.")
+        self.note(f, "Изменённые поля помечаются «*». Порты 1–3 = MbSlave, Master 0–2 — как в автоматическом шаге.")
         lf = ttk.LabelFrame(f, text="Настройка TCP", padding=10); lf.pack(fill="x", pady=(0, 8))
         self.sys_v = {}
         for i, (k, t) in enumerate((("ip", "IP-адрес"), ("mask", "Маска"), ("gw", "Шлюз"), ("dns", "DNS"))):
@@ -435,9 +434,7 @@ class ManualMixin:
         bar = ttk.Frame(f); bar.pack(fill="x", pady=(8, 2))
         self.mbtn(bar, "Прочитать настройки", self.m_ai_cfg_read).pack(side="left")
         self.mbtn(bar, "Записать настройки", self.m_ai_cfg_write).pack(side="left", padx=6)
-        ttk.Label(bar, text="настройки AI (рег. 101) — порядок слов из exe, сниффером не проверен",
-                  style="Note.TLabel").pack(side="left", padx=8)
-        lf = ttk.LabelFrame(f, text="Калибровка AI (таблица 801, подтверждена сниффером)", padding=10); lf.pack(fill="x", pady=(8, 0))
+        lf = ttk.LabelFrame(f, text="Калибровка AI (таблица 801)", padding=10); lf.pack(fill="x", pady=(8, 0))
         self.ai_ch = tk.StringVar(value="AI0")
         ttk.Combobox(lf, textvariable=self.ai_ch, values=[f"AI{i}" for i in range(8)], width=6, state="readonly").pack(side="left")
         self.mbtn(lf, "Калибровать канал (4 и 20 мА)", self.m_ai_cal).pack(side="left", padx=6)
@@ -472,7 +469,7 @@ class ManualMixin:
             rows = [[int(w["en"].get()), int(w["rf"].get()), int(w["lpf"].get()), int(w["t"].get())] for w in self.ai_w]
         except ValueError:
             messagebox.showwarning("AI", "T(ФНЧ) — целое число, мс"); return
-        if not messagebox.askyesno("AI", "Записать настройки AI?\n\nПорядок слов регистра 101 взят из exe и сниффером не проверен."):
+        if not messagebox.askyesno("AI", "Записать настройки AI?"):
             return
         self.mboard(lambda d: (d.ai_cfg_write(rows), d.ai_cfg_read())[1],
                     lambda back: self.add_log("Настройки AI записаны — OK" if back == rows else f"!!! Настройки AI: плата вернула {back}"))
@@ -552,8 +549,8 @@ class ManualMixin:
         self.mbtn(bar, "Сбросить калибровку (4 / 19)", self.m_ao_reset).pack(side="left", padx=6)
         self.mbtn(bar, "Восстановить из протокола…", lambda: self.m_cal_restore("ao")).pack(side="left")
         self.note(f, "Калибровка: в выход пишется 4 и 19 мА, CA71 меряет, измеренное записывается в таблицу 851 "
-                     "(подтверждено сниффером). Если значение «не встало», программа задаёт другую точку и снова нужную.")
-        lf = ttk.LabelFrame(f, text="Настройки AO (рег. 507, сырые слова — сниффером не проверено)", padding=10); lf.pack(fill="x", pady=(8, 0))
+                     "Если значение «не встало», программа задаёт другую точку и снова нужную.")
+        lf = ttk.LabelFrame(f, text="Настройки AO (рег. 507, сырые слова)", padding=10); lf.pack(fill="x", pady=(8, 0))
         self.ao_cfg = [tk.StringVar() for _ in range(4)]
         for i, var in enumerate(self.ao_cfg):
             ttk.Label(lf, text=f"слово {i}:").pack(side="left")
@@ -649,7 +646,7 @@ class ManualMixin:
     def m_ao_cfg_write(self):
         try: vals = [int(v.get()) for v in self.ao_cfg]
         except ValueError: messagebox.showwarning("AO", "Сначала прочитайте настройки (целые числа)"); return
-        if not messagebox.askyesno("AO", "Записать настройки AO (рег. 507)? Формат сниффером не проверен."): return
+        if not messagebox.askyesno("AO", "Записать настройки AO (рег. 507)?"): return
         self.mboard(lambda d: (d.ao_cfg_write(vals), d.ao_cfg_read())[1],
                     lambda back: self.add_log("Настройки AO записаны — OK" if list(back) == vals else f"!!! Настройки AO: плата вернула {back}"))
 
@@ -684,7 +681,6 @@ class ManualMixin:
         bar = ttk.Frame(cfg); bar.pack(fill="x")
         self.mbtn(bar, "Прочитать настройки", self.m_dio_cfg_read).pack(side="left")
         self.mbtn(bar, "Записать настройки", self.m_dio_cfg_write).pack(side="left", padx=6)
-        ttk.Label(bar, text="инверсия и дребезг подтверждены сниффером (рег. 201 и 602 ×80)", style="Note.TLabel").pack(side="left", padx=8)
         g = ttk.Frame(cfg); g.pack(fill="x", pady=(4, 0))
         for c, t in enumerate(("Канал", "DI Enable", "DI Инв.", "DI T(дреб)", "", "DO Enable", "DO Инв.")):
             ttk.Label(g, text=t, style="Muted.TLabel").grid(row=0, column=c, sticky="w", padx=6)
@@ -754,8 +750,7 @@ class ManualMixin:
         ttk.Checkbutton(bar, text="Автообновление", variable=self.auto["ci"]).pack(side="left")
         self.mbtn(bar, "Сбросить все", lambda: self.m_ci_reset(None)).pack(side="left", padx=12)
         self.mpoll["ci"] = (tab, self.m_ci_values)
-        self.note(f, "Адреса и коды режимов (0 — Отключено, 1 — Счётчик, 2 — Частотомер) взяты из exe конфигуратора, "
-                     "сниффером не проверены.")
+        self.note(f, "Режимы входа: 0 — Отключено, 1 — Счётчик, 2 — Частотомер.")
         g = ttk.Frame(f); g.pack(fill="x")
         for c, t in enumerate(("Вход", "Частота, Гц", "Счётчик", "", "Режим", "Период изм. частоты", "Антидребезг")):
             ttk.Label(g, text=t, style="Muted.TLabel").grid(row=0, column=c, sticky="w", padx=6)
@@ -787,8 +782,7 @@ class ManualMixin:
                 d.ci_reset(chs)
             except Exception as e:
                 if getattr(e, "code", None) == 2:
-                    raise RuntimeError("плата не принимает сброс счётчиков (рег. 409 ×4, исключение 2) — пришлите лог "
-                                       "сниффера кнопки «Сбросить» конфигуратора")
+                    raise RuntimeError("плата не приняла сброс счётчиков (рег. 409 ×4, исключение 2)")
                 raise
         self.mboard(fn, lambda r: (self.add_log("Счётчики сброшены" + ("" if chs is None else f": CI{chs[0] + 1}")),
                                                          self.m_ci_values()))
@@ -812,7 +806,7 @@ class ManualMixin:
             bnc = [int(w["bnc"].get()) for w in self.ci_w] if has_b else None
         except (KeyError, ValueError):
             messagebox.showwarning("Счётные входы", "Сначала прочитайте настройки; период и антидребезг — целые числа"); return
-        if not messagebox.askyesno("Счётные входы", "Записать настройки счётных входов? Адреса из exe, сниффером не проверены."): return
+        if not messagebox.askyesno("Счётные входы", "Записать настройки счётных входов?"): return
         def fn(d):
             d.ci_cfg_write(modes=modes, bounce=bnc, period=per); return d.ci_cfg_read()
         def done(r):

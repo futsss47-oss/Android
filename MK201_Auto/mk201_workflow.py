@@ -188,6 +188,8 @@ class Runner:
         sn2, mac2 = self.dev.serial_read(), self.dev.mac_read()
         ok = sn2 == sn and mac2.upper() == mac.upper().replace("-", ":")
         self.log(f"Прочитано после: серийный {sn2}, MAC {mac2} -> {'OK' if ok else 'НЕ СОВПАЛО'}")
+        if ok and getattr(self, "proto", None):
+            self.proto.set_mac(mac2, self.cfg.get("mac_src", ""))          # в протокол — то, что реально в плате
         return ok
 
     # ---- прогрев ----
@@ -620,6 +622,19 @@ class Runner:
         except (OverflowError, ValueError):
             return None, f"{d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
 
+    def service_ok(self, dev=None):
+        """Service USB в таблице 7: «годен», когда плата ответила через Service Port (основное подключение или шаг
+        «Завершение»). Ставится проверкой, не вручную."""
+        dev = dev or self.dev
+        if getattr(self, "proto", None) is None:
+            return
+        link = str(getattr(dev, "link", ""))
+        sp = str(self.cfg.get("svc_port") or "")
+        is_svc = self.cfg.get("sim") or (not getattr(dev, "is_tcp", False) and (not sp or link.startswith(sp)))
+        if is_svc:
+            self.proto.put_iface("Service USB", "годен")
+            self.results["ifaces"]["Service USB"] = "годен"
+
     def identity(self, dev):
         off, text = self._offset(dev)
         return {"sn": dev.serial_read(), "mac": dev.mac_read().upper(), "off": off, "time": text}
@@ -627,6 +642,7 @@ class Runner:
     def reference(self):
         """Эталон — то, что плата отдаёт через основное подключение (Service Port)."""
         ref = self.identity(self.dev)
+        self.service_ok()
         self.log(f"Эталон ({getattr(self.dev, 'link', 'Service Port')}): серийный {ref['sn']}, MAC {ref['mac']}, время {ref['time']}")
         want = str(self.cfg.get("serial") or "").strip()
         if want and want.isdigit() and int(want) != ref["sn"]:
@@ -679,7 +695,22 @@ class Runner:
         if proto:
             proto.put_iface(name, state)
 
-    def _check_link(self, name, ref, open_dev, hint):
+    def hold_link(self, d, name, sec):
+        """03.11.2026 (1.34): после успешного чтения держим связь sec секунд (опрос раз в 0,3 с) — оператор смотрит
+        светодиоды платы, потом просьба переключить клемму."""
+        self.log(f"[{name}] держу связь {sec:g} с — смотрите светодиоды RS-485 на плате")
+        t_end = time.time() + sec
+        while time.time() < t_end:
+            self.chk()
+            self.detail(f"{name}: связь, осталось {max(0.0, t_end - time.time()):.0f} с")
+            try:
+                d.serial_read()
+            except Exception as e:
+                self.log(f"[{name}] во время удержания связь прервалась: {e}")
+                return
+            time.sleep(0.3)
+
+    def _check_link(self, name, ref, open_dev, hint, hold=0.0):
         """Подключиться open_dev(), прочитать серийный/MAC/время, сравнить. Нет связи — «Повторить / Пропустить шаг»."""
         while True:
             self.chk()
@@ -687,11 +718,15 @@ class Runner:
                 d = open_dev()
                 try:
                     got = self.identity(d)
+                    ok, text = self.compare(name, ref, got)
+                    if ok and hold:
+                        self.log(f"[{name}] {text} — OK")
+                        self.hold_link(d, name, hold)
                 finally:
                     if d is not self.dev:
                         d.close()
-                ok, text = self.compare(name, ref, got)
-                self.log(f"[{name}] {text}" + (" — OK" if ok else ""))
+                if not (ok and hold):
+                    self.log(f"[{name}] {text}" + (" — OK" if ok else ""))
                 if not ok:
                     self.note(f"{name}: {text}")
                 return "годен" if ok else "не годен"
@@ -757,8 +792,7 @@ class Runner:
                     alt = (BAUDS.get(q[3], baud), {0: "N", 1: "O", 2: "E"}.get(q[4], "N"), {0: 1, 2: 2}.get(q[5], 1), q[0] & 255 or unit)
                     if alt == (baud, parity, stop, unit):
                         alt = None
-                self.need((f"Подключите переходник RS-485 к клемме RS-485 {p + 1}" if p == 0 else
-                           f"Переключите переходник RS-485 на клемму RS-485 {p + 1}") + f"\n({self.RS485_PINS[p]}).")
+                self.need(f"Переключите переходник RS-485 на клемму RS-485 {p + 1}.")
                 self.detail(f"{name}: {port}, {baud} бод, 8{parity}{stop}, адрес {unit}")
 
                 def open_dev(alt=alt):
@@ -778,13 +812,62 @@ class Runner:
                                  f"порта из платы: {alt[0]} бод, 8{alt[1]}{alt[2]}, адрес {alt[3]}")
                         return MK201(port, alt[0], alt[3], timeout=1.0, parity=alt[1], stopbits=alt[2], trace=tr)
                 state = self._check_link(name, ref, open_dev,
-                                         f"Проверьте подключение ({self.RS485_PINS[p]}), полярность A/B и настройки RTU "
-                                         f"на вкладке «Подключение» ({baud} бод, 8{parity}{stop}, адрес {unit}).")
+                                         f"Проверьте подключение, полярность A/B и настройки RTU "
+                                         f"на вкладке «Подключение» ({baud} бод, 8{parity}{stop}, адрес {unit}).",
+                                         hold=0.0 if self.cfg.get("sim") else float(self.cfg.get("rtu_hold", 3) or 0))
                 ok_all = ok_all and state == "годен"
                 self._iface(proto, name, state)
         finally:
             self.restore_main()
         return ok_all
+
+    # ---- шаг: завершение проверки платы (1.34) ----
+    def step_finish(self):
+        """В конце проверки конкретной платы — через Service Port: счётчики CI в 0, выходы DO выключены, порты 1–3
+        (Modbus RS-485) в режим Off. Следующей плате шаг «Порты 1–3» в начале прогона включит их заново."""
+        dev, own = self.dev, None
+        sp = str(self.cfg.get("svc_port") or "")
+        if not self.cfg.get("sim") and sp:
+            link = str(getattr(self.dev, "link", ""))
+            if getattr(self.dev, "is_tcp", False) or not link.startswith(sp):
+                self.detail(f"подключаюсь через Service Port {sp}")
+                try:
+                    own = dev = MK201(sp, int(self.cfg.get("svc_baud", 115200) or 115200), int(self.cfg.get("svc_unit", 1) or 1),
+                                      timeout=1.0, trace=getattr(self.dev, "trace", None))
+                    self.log(f"Завершение: подключился через Service Port {sp}")
+                except Exception as e:
+                    self.log(f"!!! Service Port {sp} не открылся ({e}) — работаю через основное подключение")
+                    dev = self.dev
+        try:
+            ok = True
+            self.service_ok(dev)
+            dev.ci_reset()
+            time.sleep(0.2)
+            cnt = dev.ci_counts()
+            zero = not any(cnt)
+            self.log(f"Счётчики CI сброшены: {list(cnt)}" + (" — OK" if zero else " — !!! не нулевые"))
+            ok = ok and zero
+            try:
+                dev.do_write(0)
+                self.log("Выходы DO выключены")
+            except Exception as e:
+                self.log(f"!!! DO выключить не удалось: {e}")
+                ok = False
+            regs = dev.ports_read()
+            new = list(regs)
+            for i in range(3):
+                new[8 + 6 * i + 1] = 0                       # режим «Off»
+            dev.ports_write(new)
+            time.sleep(0.3)
+            back = dev.ports_read()
+            off = all(back[8 + 6 * i + 1] == 0 for i in range(3))
+            self.log("Порты 1–3 (Modbus RS-485): " + ("Off — OK" if off else f"!!! режимы {[back[8 + 6 * i + 1] for i in range(3)]}, ожидалось 0"))
+            ok = ok and off
+            return ok
+        finally:
+            if own is not None:
+                try: own.close()
+                except Exception: pass
 
     # ---- шаг: проверка DO -> DI (петля на самой плате) ----
     @staticmethod
@@ -1001,7 +1084,7 @@ class Runner:
         i = min(i, 2)
         return str(self.cfg.get(f"ci_wave_{i + 1}") or self.CI_WAVES[i])
 
-    def ci_freq_all(self, pts, chans):
+    def ci_freq_all(self, pts, chans, proto=None):
         """03.11.2026 (1.33): режим «Частотомер» — после всех точек счётчика на этой клемме: плата в режим 2,
         генератор непрерывно на каждой частоте точек, погрешность ≤ «Частотомер: допуск» (0,01 % от 30 кГц), обратно."""
         tol = float(self.cfg.get("ci_freq_tol", 0.01))
@@ -1024,6 +1107,8 @@ class Runner:
                     ok = ok and good
                     self.results["ci_freq"].append({"ch": ch + 1, "f": f, "meas": round(fr[ch], 4), "err_pct": round(d, 5), "ok": good})
                     self.hook("ci_freq", ch, f, fr[ch], d, good)
+                    if proto:
+                        proto.put_cifreq(ch, i, f, fr[ch], d, good, self.ci_wave(i))
                     self.log(f"[CI {label} · CI{ch + 1}] задано {f:g} Гц, измерено {fr[ch]:.4f} Гц, "
                              f"погрешность {d:.4f} % (допуск {tol:g} %)" + (" — OK" if good else " — ВНЕ ДОПУСКА"))
         finally:
@@ -1128,7 +1213,7 @@ class Runner:
                     i += 1
                 if restart or p is None:
                     continue
-                ok = self.ci_freq_all(pts, pairs[p]) and ok        # та же клемма — режим «Частотомер»
+                ok = self.ci_freq_all(pts, pairs[p], proto) and ok        # та же клемма — режим «Частотомер»
                 done.add(p)
                 again = False
         except StepSkip:
@@ -1139,10 +1224,6 @@ class Runner:
                 self.log(f"Счётные входы: прежние настройки восстановлены (режимы {list(modes)})")
             except Exception as e:
                 self.log(f"Счётные входы: не удалось вернуть прежние настройки ({e})")
-        if proto and self.results["ci_freq"]:
-            bad = [r for r in self.results["ci_freq"] if not r["ok"]]
-            proto.note("D112", "Частотомер: " + "; ".join(f"CI{r['ch']} {r['f']:g} Гц → {r['meas']} Гц" for r in self.results["ci_freq"])
-                       + (" — есть выход за допуск" if bad else " — в допуске"))
         self.log("Проверка счётных входов: " + ("OK" if ok else "ЕСТЬ ОШИБКИ"))
         return ok
 
@@ -1150,16 +1231,21 @@ class Runner:
     TABLE = [("power", "Ток и мощность потребления"), ("ports", "Настройка портов"), ("time", "Дата и время"),
              ("serial", "Серийный номер и MAC"), ("ai_cal", "Калибровка AI"), ("ai_check", "Проверка AI"),
              ("ao_cal", "Калибровка AO"), ("ao_check", "Проверка AO"), ("dio", "Проверка DO → DI"),
-             ("ci", "Счётные входы CI"), ("eth", "Ethernet (Modbus TCP)"), ("rs485", "RS-485 1–3 (Modbus RTU)")]
+             ("ci", "Счётные входы CI"), ("eth", "Ethernet (Modbus TCP)"), ("rs485", "RS-485 1–3 (Modbus RTU)"),
+             ("finish", "Завершение: сброс счётчиков, Modbus off")]
 
     def run(self, steps):
-        base = self.cfg.get("base_protocol") or self.cfg.get("template")
-        proto = Protocol(base, self.cfg.get("template")) if base else None
-        if proto and self.cfg.get("base_protocol"):
+        # 03.11.2026 (1.34): протокол собирается программой (шаблон не нужен). Тот же день и тот же номер — модель
+        # прошлого прогона из .json дополняется; другой день — новый протокол.
+        proto = Protocol(self.cfg.get("prev_protocol"), tol=float(self.cfg.get("tol_percent", 0.08)),
+                         ci_tol=int(self.cfg.get("ci_tol", 1)), freq_tol=float(self.cfg.get("ci_freq_tol", 0.01)))
+        self.proto = proto
+        if self.cfg.get("base_protocol"):
             self.log(f"Дописываю в протокол: {self.cfg['base_protocol']}")
         self.results["ifaces"] = dict(self.cfg.get("ifaces") or {})
         if proto:
             proto.set_title(self.cfg.get("protocol_number") or self.cfg["serial"])
+            proto.set_mac(self.cfg.get("mac"), self.cfg.get("mac_src", ""))
             if self.cfg.get("operator"):
                 proto.set_operator(self.cfg["operator"], time.strftime("%d.%m.%Y"))
             for name, state in self.results["ifaces"].items():
@@ -1169,7 +1255,8 @@ class Runner:
         fns = {"power": lambda: self.step_power(proto), "ports": self.step_ports, "time": self.step_time,
                "serial": self.step_serial_mac, "ai_cal": self.step_ai_cal, "ai_check": lambda: self.step_ai_check(proto),
                "ao_cal": self.step_ao_cal, "ao_check": lambda: self.step_ao_check(proto), "dio": lambda: self.step_dio(proto),
-               "ci": lambda: self.step_ci(proto), "eth": lambda: self.step_eth(proto), "rs485": lambda: self.step_rs485(proto)}
+               "ci": lambda: self.step_ci(proto), "eth": lambda: self.step_eth(proto), "rs485": lambda: self.step_rs485(proto),
+               "finish": self.step_finish}
         sel = [(k, t, fns[k]) for k, t in self.TABLE if k in steps]
         done = 0
         try:
@@ -1208,6 +1295,8 @@ class Runner:
                 if okstep == "manual":
                     self.hook("step", key, "manual"); self.results["steps"][key] = "manual"
                 elif okstep is not None:
+                    if okstep:
+                        self.service_ok()
                     self.hook("step", key, "ok" if okstep else "warn")
                     self.results["steps"][key] = "ok" if okstep else "warn"
                     if not okstep:
@@ -1277,8 +1366,10 @@ class Runner:
         r["protocol"] = out
         try:
             with open(os.path.splitext(out)[0] + ".json", "w", encoding="utf-8") as f:
-                json.dump({"cfg": {k: v for k, v in self.cfg.items() if isinstance(v, (str, int, float, bool, dict, list))},
-                           "results": r, "steps": list(steps)}, f, ensure_ascii=False, indent=1, default=str)
+                json.dump({"cfg": {k: v for k, v in self.cfg.items()
+                                   if isinstance(v, (str, int, float, bool, dict, list)) and k not in ("prev_protocol", "prev_results")},
+                           "results": r, "steps": list(steps), "protocol_data": proto.export()},
+                          f, ensure_ascii=False, indent=1, default=str)
         except Exception as e:
             self.log(f"Не удалось сохранить .json рядом с протоколом: {e}")
         self.log(f"Протокол сохранён: {out}")
