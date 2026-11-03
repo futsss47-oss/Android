@@ -994,6 +994,35 @@ class Runner:
             self.dev.ci_cfg_write(modes=[1, 1, 1, 1])
         return ok
 
+    def ci_freq_all(self, pts, chans):
+        """03.11.2026 (1.33): режим «Частотомер» — после всех точек счётчика на этой клемме: плата в режим 2,
+        генератор непрерывно на каждой частоте точек, погрешность ≤ «Частотомер: допуск» (0,01 % от 30 кГц), обратно."""
+        tol = float(self.cfg.get("ci_freq_tol", 0.01))
+        where = f"CI{chans[0] + 1}+CI{chans[1] + 1}"
+        self.log(f"Счётные входы {where}: режим «Частотомер» (допуск {tol:g} % от 30 кГц = ±{30000 * tol / 100:g} Гц)")
+        self.dev.ci_cfg_write(modes=[2, 2, 2, 2])
+        ok = True
+        try:
+            for i, (f, _) in enumerate(pts):
+                self.chk()
+                label = f"частотомер {i + 1}/{len(pts)}"
+                self.detail(f"{label}: {f:g} Гц, клемма {where}")
+                self.gen.continuous(f)
+                time.sleep(max(float(self.cfg.get("ci_freq_settle", 3.0)), 20.0 / f))
+                fr = self.dev.ci_freq()
+                for ch in chans:
+                    d = abs(fr[ch] - f) / 30000 * 100
+                    good = d <= tol
+                    ok = ok and good
+                    self.results["ci_freq"].append({"ch": ch + 1, "f": f, "meas": round(fr[ch], 4), "err_pct": round(d, 5), "ok": good})
+                    self.hook("ci_freq", ch, f, fr[ch], d, good)
+                    self.log(f"[CI {label} · CI{ch + 1}] задано {f:g} Гц, измерено {fr[ch]:.4f} Гц, "
+                             f"погрешность {d:.4f} % (допуск {tol:g} %)" + (" — OK" if good else " — ВНЕ ДОПУСКА"))
+        finally:
+            self.gen.stop_continuous()
+            self.dev.ci_cfg_write(modes=[1, 1, 1, 1])
+        return ok
+
     def wiring(self, text, want, ask=True):
         """Просьба переключить клеммы генератора (в симуляторе — переключает «провода» сама).
         ask=False — оператор уже получил подсказку в окне «Повторить / Пропустить шаг»."""
@@ -1004,7 +1033,10 @@ class Runner:
             sim(want)
 
     def step_ci(self, proto):
-        """Синус 20 Vpp с генератора напрямую на счётные входы (без ключа и 24 В).
+        """03.11.2026 (1.33): прямоугольник (или синус — выбор на «Подключении») 20 Vpp с генератора напрямую.
+        На клемме: режим «Счётчик» — все точки (10 Гц × 300, 15 кГц × 450000, 30 кГц × 900000), затем режим
+        «Частотомер» — те же частоты, затем «переключите на другую клемму» и всё то же.
+        Было: синус 20 Vpp с генератора напрямую на счётные входы (без ключа и 24 В).
         29.10.2026: по клеммам — сначала одна (CI1+CI2 или CI3+CI4, любая) на всех частотах 10 Гц / 15 кГц / 30 кГц,
         потом другая на всех частотах (все 4 входа сразу иногда теряли или добавляли импульсы).
         На каждой частоте ещё проверка в режиме частотомера (ТУ п. 8.9.1). Окна — только «переключите на другую
@@ -1015,8 +1047,10 @@ class Runner:
         modes, period, bounce = self.dev.ci_cfg_read()
         self.log(f"Счётные входы: в плате режимы {list(modes)}")
         amp = float(self.cfg.get("gen_amp", 20))
-        self.log(f"Генератор: синус {amp:g} Vpp, смещение 0, Hi-Z, Burst · N Cycle · ручной запуск, выход вкл")
-        self.gen.setup(amp)
+        wave = str(self.cfg.get("gen_wave") or "прямоугольник")
+        form = "синус" if wave.lower().startswith("син") or wave.upper() == "SINE" else "прямоугольник (скважность 50 %, на 30 кГц — 60 %)"
+        self.log(f"Генератор: {form} {amp:g} Vpp, смещение 0, Hi-Z, Burst · N Cycle · ручной запуск, выход вкл")
+        self.gen.setup(amp, wave)
         pts = proto.ci_points(0) if proto else [(10, 300), (15000, 450000), (30000, 900000)]
         self.can_reset = True
         ok = True
@@ -1083,10 +1117,10 @@ class Runner:
                         self.note(f"{f:g} Гц: генератор на CI{pairs[p][0] + 1}+CI{pairs[p][1] + 1}, а выросли и "
                                   + ", ".join(f"CI{c + 1} (+{cnts[c]})" for c in stray) + " — наводка или перемычка между клеммами?")
                     ok = self.ci_eval(proto, i, f, n, pairs[p], cnts, start, got, label) and ok
-                    ok = self.ci_freq_check(f, pairs[p], label) and ok
                     i += 1
                 if restart or p is None:
                     continue
+                ok = self.ci_freq_all(pts, pairs[p]) and ok        # та же клемма — режим «Частотомер»
                 done.add(p)
                 again = False
         except StepSkip:

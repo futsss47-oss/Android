@@ -192,6 +192,21 @@ class Generator(_Visa):
     pause = 0.6
     margin = 0.5
     AMP_MAX = 20.0
+    # 03.11.2026 (1.33): форма сигнала на счётные входы — по умолчанию прямоугольник (выбирается на «Подключении»
+    # и в ручном режиме). У прямоугольника на 30 кГц скважность 60 %: импульс по ТУ не короче 17 мкс.
+    WAVES = {"прямоугольник": "SQUARE", "синус": "SINE"}
+    wave = "SQUARE"
+
+    @classmethod
+    def wave_code(cls, name):
+        n = str(name or "").strip().lower()
+        return cls.WAVES.get(n, "SINE" if n.upper() == "SINE" else "SQUARE")
+
+    def duty_for(self, freq):
+        """Скважность прямоугольника, %: 60 на частотах выше 25 кГц (импульс ≥ 17 мкс), иначе 50. Синус — None."""
+        if self.wave != "SQUARE":
+            return None
+        return 60 if float(freq) > 25000 else 50
 
     def __init__(self, resource, log=None, channel=1, pause=0.6, margin=0.5, strict=False):
         self.pause, self.margin = float(pause), float(margin)
@@ -204,15 +219,19 @@ class Generator(_Visa):
             self.log(f"ответ «{self.idn}» не похож на АКИП-3409 — прибор выбран вручную, команды всё равно отправляю")
         self.c = f"C{int(channel)}"
 
-    def setup(self, amp=20.0):
-        """Синус amp Vpp, смещение 0, Hi-Z, Burst · N Cycle · ручной запуск, фаза 0 (между пакетами 0 В), выход вкл.
+    def setup(self, amp=20.0, wave="SQUARE"):
+        """Прямоугольник или синус amp Vpp, смещение 0, Hi-Z, Burst · N Cycle · ручной запуск, фаза 0 (между пакетами 0 В), выход вкл.
         После включения питания прибор всё это забывает, поэтому настройка перед каждым шагом.
         Сначала параметры формы (BSWV), потом Burst. Команды по одной, после каждой — контрольный запрос."""
         amp = float(amp)
         if not 1.0 <= amp <= self.AMP_MAX:
             raise RuntimeError(f"амплитуда {amp:g} Vpp вне 1…{self.AMP_MAX:g}")
         c = self.c
-        for cmd, chk in ((f"{c}:BSWV WVTP,SINE", f"{c}:BSWV?"), (f"{c}:BSWV AMP,{amp:g}", f"{c}:BSWV?"),
+        self.wave = self.wave_code(wave)
+        shape = [(f"{c}:BSWV WVTP,{self.wave}", f"{c}:BSWV?")]
+        if self.wave == "SQUARE":
+            shape.append((f"{c}:BSWV DUTY,50", f"{c}:BSWV?"))
+        for cmd, chk in tuple(shape) + ((f"{c}:BSWV AMP,{amp:g}", f"{c}:BSWV?"),
                          (f"{c}:BSWV OFST,0", f"{c}:BSWV?"), (f"{c}:OUTP LOAD,HZ", f"{c}:OUTP?"),
                          (f"{c}:BTWV STATE,ON", f"{c}:BTWV?"), (f"{c}:BTWV TRSR,MAN", f"{c}:BTWV?"),
                          (f"{c}:BTWV GATE_NCYC,NCYC", f"{c}:BTWV?"), (f"{c}:BTWV STPS,0", f"{c}:BTWV?"),
@@ -225,6 +244,9 @@ class Generator(_Visa):
         """Непрерывный сигнал freq (для режима частотомера): Burst выкл, частота обычной командой."""
         self.write(f"{self.c}:BTWV STATE,OFF")
         self.write(f"{self.c}:BSWV FRQ,{freq:g}")
+        duty = self.duty_for(freq)
+        if duty is not None:
+            self.write(f"{self.c}:BSWV DUTY,{duty:g}")
         return self.query(f"{self.c}:BSWV?")
 
     def stop_continuous(self):
@@ -342,7 +364,7 @@ class Generator(_Visa):
             m += 1                                      # (смена TIME может сама запустить пакет)
         size = count // m
         # ТУ: импульс не короче 17 мкс; на 30 кГц период 33 мкс -> скважность 60 % (20 мкс)
-        self.prepare(freq, size)
+        self.prepare(freq, size, duty=self.duty_for(freq))
         if before: before()
         # порядок попыток запуска: выбранная команда, затем остальные, в конце — кнопка Trig вручную
         order = [trig] + [t for t in self.TRIGGERS if t not in (trig, MANUAL_TRIG)]
@@ -402,8 +424,9 @@ class ManualGen:
         self.ask, self.log, self.margin = ask, log or (lambda s: None), float(margin)
         self.trig_ok = None
 
-    def setup(self, amp=20.0):
-        self.ask(f"Генератор не подключён к ПК — настройте вручную: синус {amp:g} Vpp, смещение 0, нагрузка Hi-Z, "
+    def setup(self, amp=20.0, wave="SQUARE"):
+        form = "синус" if Generator.wave_code(wave) == "SINE" else "прямоугольник (скважность 50 %, на 30 кГц — 60 %)"
+        self.ask(f"Генератор не подключён к ПК — настройте вручную: {form}, {amp:g} Vpp, смещение 0, нагрузка Hi-Z, "
                  "Burst · N Cycle · Source Manual, выход CH1 включён.")
 
     def pulses(self, freq, count, burst_max=50000, method="burst", stop=None, progress=None,
