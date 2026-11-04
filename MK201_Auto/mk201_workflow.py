@@ -1056,27 +1056,6 @@ class Runner:
             ok = ok and good
         return ok
 
-    def ci_freq_check(self, f, chans, label):
-        """ТУ п. 8.9.1: режим частотомера. Непрерывный сигнал f, читаем частоту, погрешность от 30 кГц ≤ 0,01 %."""
-        tol = float(self.cfg.get("ci_freq_tol", 0.01))
-        self.dev.ci_cfg_write(modes=[2, 2, 2, 2])
-        ok = True
-        try:
-            self.gen.continuous(f)
-            time.sleep(max(float(self.cfg.get("ci_freq_settle", 3.0)), 20.0 / f))
-            fr = self.dev.ci_freq()
-            for ch in chans:
-                d = abs(fr[ch] - f) / 30000 * 100
-                good = d <= tol
-                ok = ok and good
-                self.results["ci_freq"].append({"ch": ch + 1, "f": f, "meas": round(fr[ch], 4), "err_pct": round(d, 5), "ok": good})
-                self.log(f"[CI {label} · CI{ch + 1}] частотомер: задано {f:g} Гц, измерено {fr[ch]:.4f} Гц, "
-                         f"погрешность {d:.4f} % (допуск {tol:g} %)" + (" — OK" if good else " — ВНЕ ДОПУСКА"))
-        finally:
-            self.gen.stop_continuous()
-            self.dev.ci_cfg_write(modes=[1, 1, 1, 1])
-        return ok
-
     CI_WAVES = ("прямоугольник", "синус", "синус")   # по умолчанию: 10 Гц, 15 кГц, 30 кГц
 
     def ci_wave(self, i):
@@ -1086,10 +1065,11 @@ class Runner:
 
     def ci_freq_all(self, pts, chans, proto=None):
         """03.11.2026 (1.33): режим «Частотомер» — после всех точек счётчика на этой клемме: плата в режим 2,
-        генератор непрерывно на каждой частоте точек, погрешность ≤ «Частотомер: допуск» (0,01 % от 30 кГц), обратно."""
+        генератор непрерывно на каждой частоте точек, погрешность ≤ «Частотомер: допуск» (±0,01 % от заданной частоты), обратно."""
         tol = float(self.cfg.get("ci_freq_tol", 0.01))
         where = f"CI{chans[0] + 1}+CI{chans[1] + 1}"
-        self.log(f"Счётные входы {where}: режим «Частотомер» (допуск {tol:g} % от 30 кГц = ±{30000 * tol / 100:g} Гц)")
+        self.log(f"Счётные входы {where}: режим «Частотомер» (допуск ±{tol:g} % от заданной частоты: "
+                 + ", ".join(f"{f:g} Гц → ±{f * tol / 100:g} Гц" for f, _ in pts) + ")")
         self.dev.ci_cfg_write(modes=[2, 2, 2, 2])
         ok = True
         try:
@@ -1102,7 +1082,7 @@ class Runner:
                 time.sleep(max(float(self.cfg.get("ci_freq_settle", 3.0)), 20.0 / f))
                 fr = self.dev.ci_freq()
                 for ch in chans:
-                    d = abs(fr[ch] - f) / 30000 * 100
+                    d = abs(fr[ch] - f) / f * 100                  # относительная погрешность, % от заданной частоты (паспорт)
                     good = d <= tol
                     ok = ok and good
                     self.results["ci_freq"].append({"ch": ch + 1, "f": f, "meas": round(fr[ch], 4), "err_pct": round(d, 5), "ok": good})

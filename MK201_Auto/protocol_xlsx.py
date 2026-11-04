@@ -20,7 +20,7 @@ HEAD_FILL = PatternFill("solid", start_color="FFEEF1F6", end_color="FFEEF1F6")
 
 SP_DEFAULT = [0, 4, 8, 12, 16, 20]                           # точки AI / AO, мА
 CI_POINTS = [(10, 300), (15000, 450000), (30000, 900000)]    # частота, Гц × число импульсов (ТУ, табл. 6)
-FREQ_BASE = 30000.0                                          # погрешность частотомера — % от 30 кГц (ТУ п. 8.9.1)
+# Погрешность частотомера — ОТНОСИТЕЛЬНАЯ, % от заданной частоты (паспорт: «основная относительная погрешность ±0,01 %»).
 IFACES = ("Ethernet 10/100 Base-T", "RS-485_1", "RS-485_2", "RS-485_3", "CAN", "Service USB")
 
 NCOL = 13
@@ -236,8 +236,7 @@ class Protocol:
     # --- таблица 6.5: частотомер, все четыре входа в одной таблице
     def _tbl_freq(self, ws, r):
         tol = self.freq_tol
-        self._title(ws, r, 1, NCOL, f"Таблица 6.5 – Проверка частотомера счетных входов (допуск ±{tol:g} % от 30 кГц = "
-                                    f"±{FREQ_BASE * tol / 100:g} Гц)")
+        self._title(ws, r, 1, NCOL, f"Таблица 6.5 – Проверка частотомера счетных входов (допуск ±{tol:g} % от заданной частоты)")
         self._hdr(ws, r + 1, 1, r + 2, 1, "№")
         self._hdr(ws, r + 1, 2, r + 2, 3, "Задано,\nГц")             # тип сигнала в протоколе не показываем
         groups = ((4, 5, 5), (6, 7, 7), (8, 10, 9), (11, 12, 12))       # колонки: измерено, погрешность (CI3: H:I + J)
@@ -260,9 +259,9 @@ class Protocol:
                 e = ents[ch]
                 red = bool(e) and not e["ok"]
                 fill = RED_FILL if red else None
-                self._merge(ws, rr, c1, rr, c2, e["meas"] if e else None, fmt="0.00", fill=fill, red=red, size=8)
+                self._merge(ws, rr, c1, rr, c2, e["meas"] if e else None, fmt="0.0000", fill=fill, red=red, size=7)
                 self._cell(ws, rr, ce, f'=IF({CL(c1)}{rr}="","",ABS({CL(c1)}{rr}-$B{rr})'
-                                       f'/{FREQ_BASE:g}*100)', fmt="0.0000", fill=fill, red=red)
+                                       f'/$B{rr}*100)', fmt="0.0000", fill=fill, red=red)
                 errs.append(f"{CL(ce)}{rr}")
             self._cell(ws, rr, 13, f'=IF(COUNT({",".join(errs)})=0,"",IF(MAX({",".join(errs)})<={tol:g},"годен","не годен"))', size=8)
         return r + 6
