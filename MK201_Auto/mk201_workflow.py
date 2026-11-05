@@ -162,20 +162,14 @@ class Runner:
 
     # ---- шаг 2: время ----
     def step_time(self):
-        sync = getattr(self.dev, "datetime_sync", None)
-        if sync is None:                                   # симулятор
-            self.dev.datetime_write(); time.sleep(0.3)
-            (y, mo, d, h, mi, s), dt = self.dev.datetime_read(), 0
-            ok = True
-        else:
-            ok, (y, mo, d, h, mi, s), dt = sync(self.log)
+        """Дата и время — как в конфигураторе: «Из системы» -> «Записать» -> «Сравнить с системным»
+        (одна запись, через 1 с сравнение: даты равны, время ±1 с). Без запасных вариантов и повторов."""
+        self.log(f"Записываю время ПК: {time.strftime('%d.%m.%Y %H:%M:%S')}")
+        ok, (y, mo, d, h, mi, s), text = self.dev.datetime_sync()
         self.log(f"Время ПК    {time.strftime('%d.%m.%Y %H:%M:%S')}")
-        self.log(f"Время платы {d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
-                 + (f", расхождение {dt:.0f} с" if dt != float("inf") else ""))
+        self.log(f"Время платы {d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d} — {text}")
         if not ok:
-            self.note("часы платы не приняли время ни одним способом (плата отвечает «принято», но время не меняется). "
-                      "Проверьте в конфигураторе «Дата и время → Записать»; если там записывается — снимите это сниффером "
-                      "(mk201_sniffer.py) и пришлите лог")
+            self.note(f"дата и время: {text}")
         return ok
 
     # ---- шаг 3: серийник и MAC ----

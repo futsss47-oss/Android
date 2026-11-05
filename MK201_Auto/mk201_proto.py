@@ -318,24 +318,11 @@ class MK201:
         h, m, s, y, mo, d = self.read_regs(ADDR_DATETIME_READ, 6)
         return (2000 + (y & 0xFF), mo & 0xFF, d & 0xFF, h & 0xFF, m & 0xFF, s & 0xFF)
 
-    def datetime_write(self, t=None, order="hms", unblock=False):
-        """Запись времени в 1042 ×6. order: «hms» — час, мин, сек, год, мес, день (как чтение 1036);
-        «ymd» — год, мес, день, час, мин, сек. unblock — сначала ключ разблокировки (как у серийника и MAC)."""
+    def datetime_write(self, t=None):
+        """Запись времени, как в конфигураторе (download_mk201_datetime): 1042 ×6 = час, мин, сек, год−2000, мес, день,
+        функция 100, одной записью."""
         t = t or time.localtime()
-        hms, ymd = [t.tm_hour, t.tm_min, t.tm_sec], [t.tm_year - 2000, t.tm_mon, t.tm_mday]
-        if unblock:
-            self.unblock()
-        self.write_regs(ADDR_DATETIME_SET, hms + ymd if order == "hms" else ymd + hms)
-
-    # 02.11.2026: плата ответила «запись принята», а часы сразу после записи ещё старые (01.01.2000);
-    # со второго раза время встало — плата применяет его не мгновенно. Поэтому после записи часы читаются
-    # несколько раз (до wait с), не встало — та же запись ещё раз.
-    # 05.11.2026 (1.38): запасной вариант с другим порядком полей (год-мес-день-час-мин-сек) УБРАН. Порядок
-    # час-мин-сек-год-мес-день подтверждён на плате (журнал 03.11). Запасной вариант был опасен: если плата с опозданием
-    # применяла прошлую правильную запись, программа считала, что сработал другой порядок, запоминала его — и следующие
-    # записи ставили часы с большим расхождением. Теперь: запись в начале секунды (без сдвига почти на 1 с),
-    # проверка чтением, затем через confirm с ещё одна проверка — запоздавшее применение старой записи тоже видно.
-    DT_METHODS = (("hms", False), ("hms", False), ("hms", True))
+        self.write_regs(ADDR_DATETIME_SET, [t.tm_hour, t.tm_min, t.tm_sec, t.tm_year - 2000, t.tm_mon, t.tm_mday])
 
     def datetime_diff(self):
         """(время платы, расхождение с ПК в секундах)."""
@@ -347,48 +334,33 @@ class MK201:
         return (y, mo, d, h, mi, s), abs(time.time() - board)
 
     @staticmethod
-    def _to_second_start():
-        """Подождать начала следующей секунды ПК: тогда записанные секунды точны (иначе плата отстаёт до 1 с)."""
-        frac = time.time() % 1.0
-        if frac > 0.05:
-            time.sleep(1.0 - frac + 0.01)
-
-    def datetime_sync(self, log=print, tol=2.0, settle=0.5, wait=3.0, confirm=1.0):
-        """Записать время ПК и убедиться чтением, что часы платы его приняли и держат. -> (ok, время платы, расхождение)."""
-        board, diff = None, float("inf")
-        for n, (order, unb) in enumerate(self.DT_METHODS):
-            if n:
-                log("Время не встало — записываю ещё раз" + (" (с ключом разблокировки)" if unb else ""))
-            self._to_second_start()
-            try:
-                self.datetime_write(order=order, unblock=unb)
-            except ModbusError as e:
-                log(f"  плата отказала: {e}")
-                continue
-            t0 = time.time()
-            while True:                                  # плата применяет время не сразу — ждём до wait с
-                time.sleep(settle)
-                board, diff = self.datetime_diff()
-                if diff <= tol or time.time() - t0 >= wait:
-                    break
-            if diff <= tol:
-                time.sleep(confirm)                      # ещё раз: не применила ли плата запоздавшую прошлую запись
-                board2, diff2 = self.datetime_diff()
-                if diff2 <= tol:
-                    return True, board2, diff2
-                log(f"  через {confirm:g} с время платы {self._fmt(board2)} — разошлось на {diff2:.0f} с, записываю ещё раз")
-                board, diff = board2, diff2
-                continue
-            try:
-                log(f"  в регистрах записи 1042 ×6 сейчас: {self.read_regs(ADDR_DATETIME_SET, 6)}")
-            except Exception:
-                pass
-        return False, board, diff
-
-    @staticmethod
     def _fmt(t):
         y, mo, d, h, mi, s = t
         return f"{d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
+
+    def datetime_compare(self):
+        """Сравнение с системным временем, как кнопка конфигуратора (cmp_with_system_datetime):
+        даты должны совпасть, время — с точностью до 1 с. -> (годен, время платы, текст)."""
+        y, mo, d, h, mi, s = board = self.datetime_read()
+        now = time.localtime()
+        if (y, mo, d) != (now.tm_year, now.tm_mon, now.tm_mday):
+            return False, board, f"Даты не совпадают: в плате {d:02d}.{mo:02d}.{y}, на ПК {time.strftime('%d.%m.%Y', now)}"
+        delta = (h * 3600 + mi * 60 + s) - (now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
+        if abs(delta) > 1:
+            return False, board, (f"Время в устройстве отстаёт от системного на {-delta} с" if delta < 0 else
+                                  f"Время в устройстве опережает системное на {delta} с")
+        return True, board, "Дата и время совпадают с точностью до 1 с"
+
+    def datetime_sync(self, log=print, settle=1.0):
+        """05.11.2026 (1.39): как в оригинальном конфигураторе — без запасных вариантов и повторов: одна запись
+        времени ПК, через settle с чтение и сравнение (даты равны, время ±1 с). Запись — в начале секунды ПК,
+        чтобы записанные секунды не отставали от ПК почти на 1 с. -> (годен, время платы, текст)."""
+        frac = time.time() % 1.0
+        if frac > 0.05:
+            time.sleep(1.0 - frac + 0.01)
+        self.datetime_write()
+        time.sleep(settle)
+        return self.datetime_compare()
 
     # ---- заводские данные ----
     def unblock(self):

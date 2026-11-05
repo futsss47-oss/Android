@@ -157,7 +157,7 @@ class SimBoard(MK201):
         return c * w.ao_g[ch] + w.ao_o[ch]
 
     # ---- системные ----
-    def datetime_write(self, t=None, **kw): pass
+    def datetime_write(self, t=None): pass
     def datetime_read(self):
         t = time.localtime(); return (t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec)
     def serial_write(self, n): self.w.serial = int(n)

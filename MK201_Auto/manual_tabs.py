@@ -317,16 +317,15 @@ class ManualMixin:
             y, mo, d, h, mi, s = t
             diff = abs(time.mktime(time.localtime()) - time.mktime((y, mo, d, h, mi, s, 0, 0, -1)))
             self.m_dt.configure(text=f"в плате: {d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}  (расхождение с ПК {diff:.0f} с)",
-                                foreground=OK if diff <= 1.5 else ERR)
+                                foreground=OK if diff <= 1 else ERR)
         self.mboard(lambda d: d.datetime_read(), done)
 
     def m_dt_write(self):
         def done(r):
-            ok, _, _ = r
-            self.add_log("Время ПК записано в плату" if ok else
-                         "Часы платы не приняли время (плата ответила «принято», но время не изменилось)", None if ok else "err")
+            ok, _, text = r
+            self.add_log(f"Время ПК записано в плату — {text}", "ok" if ok else "err")
             self.m_dt_read()
-        self.mboard(lambda d: d.datetime_sync(lambda m: self.ui.log(m, "warn")), done)
+        self.mboard(lambda d: d.datetime_sync(), done)
 
     # ---------------- Системные настройки ----------------
     def _m_sys(self, tab, f):
