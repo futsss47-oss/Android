@@ -1150,6 +1150,8 @@ class App(ManualMixin):
         seen = {}
         for name, label, key, kind in self.dev_rows:
             p = self.port(key) if kind == "com" else ""
+            if name == "board" and self.v["conn_mode"].get() != "Service Port":
+                p = ""                                   # плата по RTU/TCP — её COM (Service Port) не используется
             if p:
                 if p.upper() in seen:
                     return f"Порт {p} выбран и для «{seen[p.upper()]}», и для «{label}». Выберите разные порты."
@@ -1264,6 +1266,24 @@ class App(ManualMixin):
         t0 = time.time(); lim = float(S["board_wait"])
         if self.connecting:
             lim = min(lim, max(2.0, self.conn_left() - 8))   # подключение ограничено по времени (1.30)
+        if self.v["conn_mode"].get() != "Service Port":
+            # 1.37: связь по Modbus RTU / TCP — ждём, пока плата ответит по ней (Service Port не нужен)
+            try:
+                kw, text = self.board_link()
+            except Exception as e:
+                log(f"Плата: {e}", "warn"); return True
+            while time.time() - t0 < lim:
+                try:
+                    d = MK201(**kw)
+                    try:
+                        d.serial_read()
+                    finally:
+                        d.close()
+                    log(f"Плата ответила ({text}) через {time.time() - t0:.0f} с", "dim"); return True
+                except Exception:
+                    time.sleep(1.0)
+            log(f"За {lim:g} с плата не ответила ({text}) — проверьте питание, кабель и настройки связи", "warn")
+            return True
         while time.time() - t0 < lim:
             now = {p for p, _ in ports.list_ports()}
             if bp and bp in now and ports.probe_board(bp, baud):
@@ -1369,17 +1389,25 @@ class App(ManualMixin):
             # 2) COM-порты
             self.close_com()
             if auto:
-                saved = {"board": self.port("port"), "relay": self.port("relay_port"), "cal": self.port("cal_port")}
+                svc = self.v["conn_mode"].get() == "Service Port"
+                saved = {"relay": self.port("relay_port"), "cal": self.port("cal_port")}
+                if svc:
+                    saved["board"] = self.port("port")
+                else:
+                    log(f"Связь с платой — {self.v['conn_mode'].get()}: Service Port платы не ищу", "dim")
                 known = ports.quick_check(saved, lambda t: log(t, "dim"))
-                if not all(known.get(k) for k in ("board", "relay", "cal")):
+                if not all(known.get(k) for k in saved):
                     log(f"Ищу остальные устройства по COM-портам (осталось {self.conn_left():.0f} с)…", "dim")
-                found = ports.autodetect(lambda t: log(t, "dim"), busy={self.port("rs485_port")} - {""}, known=known, stop=late)
+                found = ports.autodetect(lambda t: log(t, "dim"), busy={self.port("rs485_port")} - {""}, known=known, stop=late,
+                                         board=svc)
                 def apply():
                     lst = dict(ports.list_ports())
                     miss = []
                     for name, label, key, kind in self.dev_rows:
                         fk = "scanner" if name == "scan" else name
                         if kind != "com":
+                            continue
+                        if name == "board" and not svc:
                             continue
                         if name == "rs485":          # переходник MOXA: подставляем, только если он ещё не выбран
                             if found.get("rs485") and not self.port("rs485_port"):
@@ -1935,7 +1963,8 @@ class App(ManualMixin):
                        unit=int(v["unit"] or 1), base_protocol=base, retry_bad=bool(getattr(self, "retry_mode", False)),
                        prev_steps=(prev.get("results", {}).get("steps_all") or prev.get("results", {}).get("steps") or {}),
                        prev_results=prev.get("results", {}), prev_protocol=prev.get("protocol_data"),
-                       svc_port=self.port("port"), svc_baud=int(v["baud"] or 115200), svc_unit=int(v["unit"] or 1))
+                       svc_port=self.port("port") if v["conn_mode"] == "Service Port" else "",
+                       svc_baud=int(v["baud"] or 115200), svc_unit=int(v["unit"] or 1))
             if sim:
                 cfg.update(ai_settle=0, ao_settle=0, reassert_settle=0, psu_settle=0, dio_on=0, dio_volt=0,
                            cal_settle=0, power_settle=0, relay_settle=0, gen_margin=0)

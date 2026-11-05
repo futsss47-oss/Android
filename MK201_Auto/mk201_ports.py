@@ -127,10 +127,12 @@ def quick_check(saved, log=lambda s: None):
     return out
 
 
-def autodetect(log=lambda s: None, busy=(), known=None, stop=lambda: False):
+def autodetect(log=lambda s: None, busy=(), known=None, stop=lambda: False, board=True):
     """-> {'board': порт|None, 'relay': ..., 'cal': ..., 'scanner': ...}. busy — открытые нами порты (не трогать),
-    known — уже найденное (эти порты и роли не проверяются повторно)."""
+    known — уже найденное (эти порты и роли не проверяются повторно). board=False — плату по COM-портам не искать
+    (05.11.2026, 1.37: связь с платой выбрана по Modbus RTU или TCP — Service Port не нужен)."""
     found = {"board": None, "relay": None, "cal": None, "scanner": None, "rs485": None}
+    roles = ("board", "relay", "cal") if board else ("relay", "cal")
     found.update({k: v for k, v in (known or {}).items() if k in found and v})
     busy = set(busy) | {v for v in found.values() if v}
     rest, moxa = [], []
@@ -142,7 +144,7 @@ def autodetect(log=lambda s: None, busy=(), known=None, stop=lambda: False):
             # Плату на MOXA не ищем (через RS-485 она тоже ответит), CA71 — ищем; оставшийся порт MOXA — RS-485.
             if p.device not in busy:
                 moxa.append(p.device)
-        elif p.device in busy or all(found[k] for k in ("board", "relay", "cal")) or is_bluetooth(p) or is_virtual(p):
+        elif p.device in busy or all(found[k] for k in roles) or is_bluetooth(p) or is_virtual(p):
             continue
         else:
             rest.append(p)
@@ -161,7 +163,7 @@ def autodetect(log=lambda s: None, busy=(), known=None, stop=lambda: False):
     elif len(left) > 1:
         log(f"Портов MOXA несколько ({', '.join(left)}) — переходник RS-485 выберите вручную")
     for p in rest:
-        if all(found[k] for k in ("board", "relay", "cal")):
+        if all(found[k] for k in roles):
             break
         if stop():
             log("Время на подключение вышло — остальные порты не проверяю (приборы выберите вручную или «Автопоиск»)")
@@ -171,7 +173,7 @@ def autodetect(log=lambda s: None, busy=(), known=None, stop=lambda: False):
             else [("board", probe_board), ("cal", probe_ca71), ("relay", probe_relay)]
         log(f"Проверяю {p.device} ({p.description})…")
         for name, fn in order:
-            if found[name]:
+            if found[name] or name not in roles:
                 continue
             if stop():
                 break

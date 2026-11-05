@@ -630,7 +630,9 @@ class Runner:
             return
         link = str(getattr(dev, "link", ""))
         sp = str(self.cfg.get("svc_port") or "")
-        is_svc = self.cfg.get("sim") or (not getattr(dev, "is_tcp", False) and (not sp or link.startswith(sp)))
+        mode = str(self.cfg.get("conn_mode") or "Service Port")
+        is_svc = self.cfg.get("sim") or (sp and not getattr(dev, "is_tcp", False) and link.startswith(sp)) or \
+            (mode == "Service Port" and not getattr(dev, "is_tcp", False) and not sp)
         if is_svc:
             self.proto.put_iface("Service USB", "годен")
             self.results["ifaces"]["Service USB"] = "годен"
@@ -824,7 +826,9 @@ class Runner:
     # ---- шаг: завершение проверки платы (1.34) ----
     def step_finish(self):
         """В конце проверки конкретной платы — через Service Port: счётчики CI в 0, выходы DO выключены, порты 1–3
-        (Modbus RS-485) в режим Off. Следующей плате шаг «Порты 1–3» в начале прогона включит их заново."""
+        (Modbus RS-485) в режим Off. Следующей плате шаг «Порты 1–3» в начале прогона включит их заново.
+        1.37: связь с платой выбрана по Modbus RTU / TCP — всё то же по ней, Service Port не открывается. По RTU
+        выключение портов обрывает эту же связь — ответа на запись и чтения после неё может не быть, это ожидаемо."""
         dev, own = self.dev, None
         sp = str(self.cfg.get("svc_port") or "")
         if not self.cfg.get("sim") and sp:
@@ -857,9 +861,23 @@ class Runner:
             new = list(regs)
             for i in range(3):
                 new[8 + 6 * i + 1] = 0                       # режим «Off»
-            dev.ports_write(new)
-            time.sleep(0.3)
-            back = dev.ports_read()
+            via_rtu = not getattr(dev, "is_tcp", False) and str(self.cfg.get("conn_mode")) == "Modbus RTU" and own is None
+            if via_rtu:
+                try:
+                    dev.ports_write(new)
+                except Exception as e:
+                    self.log(f"Порты 1–3: команда отправлена, плата не ответила ({type(e).__name__}) — связь по RS-485 "
+                             "выключается вместе с портами")
+                time.sleep(0.5)
+                try:
+                    back = dev.ports_read()
+                except Exception:
+                    self.log("Порты 1–3 (Modbus RS-485): Off — связь по RS-485 пропала, как и должно быть после выключения")
+                    return ok
+            else:
+                dev.ports_write(new)
+                time.sleep(0.3)
+                back = dev.ports_read()
             off = all(back[8 + 6 * i + 1] == 0 for i in range(3))
             self.log("Порты 1–3 (Modbus RS-485): " + ("Off — OK" if off else f"!!! режимы {[back[8 + 6 * i + 1] for i in range(3)]}, ожидалось 0"))
             ok = ok and off
