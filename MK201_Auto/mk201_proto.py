@@ -329,9 +329,13 @@ class MK201:
 
     # 02.11.2026: плата ответила «запись принята», а часы сразу после записи ещё старые (01.01.2000);
     # со второго раза время встало — плата применяет его не мгновенно. Поэтому после записи часы читаются
-    # несколько раз (до wait с), не встало — та же запись ещё раз; другие варианты — только запасные.
-    DT_METHODS = (("hms", False), ("hms", False), ("hms", True), ("ymd", False), ("ymd", True))
-    dt_method = None
+    # несколько раз (до wait с), не встало — та же запись ещё раз.
+    # 05.11.2026 (1.38): запасной вариант с другим порядком полей (год-мес-день-час-мин-сек) УБРАН. Порядок
+    # час-мин-сек-год-мес-день подтверждён на плате (журнал 03.11). Запасной вариант был опасен: если плата с опозданием
+    # применяла прошлую правильную запись, программа считала, что сработал другой порядок, запоминала его — и следующие
+    # записи ставили часы с большим расхождением. Теперь: запись в начале секунды (без сдвига почти на 1 с),
+    # проверка чтением, затем через confirm с ещё одна проверка — запоздавшее применение старой записи тоже видно.
+    DT_METHODS = (("hms", False), ("hms", False), ("hms", True))
 
     def datetime_diff(self):
         """(время платы, расхождение с ПК в секундах)."""
@@ -342,18 +346,20 @@ class MK201:
             return (y, mo, d, h, mi, s), float("inf")
         return (y, mo, d, h, mi, s), abs(time.time() - board)
 
-    def datetime_sync(self, log=print, tol=2.0, settle=0.5, wait=3.0):
-        """Записать время ПК и убедиться чтением, что часы платы его приняли. -> (ok, время платы, расхождение)."""
-        methods = list(self.DT_METHODS)
-        if MK201.dt_method in methods and MK201.dt_method != methods[0]:
-            methods.remove(MK201.dt_method); methods.insert(0, MK201.dt_method)
-        names = {"hms": "час-мин-сек-год-мес-день", "ymd": "год-мес-день-час-мин-сек"}
+    @staticmethod
+    def _to_second_start():
+        """Подождать начала следующей секунды ПК: тогда записанные секунды точны (иначе плата отстаёт до 1 с)."""
+        frac = time.time() % 1.0
+        if frac > 0.05:
+            time.sleep(1.0 - frac + 0.01)
+
+    def datetime_sync(self, log=print, tol=2.0, settle=0.5, wait=3.0, confirm=1.0):
+        """Записать время ПК и убедиться чтением, что часы платы его приняли и держат. -> (ok, время платы, расхождение)."""
         board, diff = None, float("inf")
-        for n, (order, unb) in enumerate(methods):
-            if n and (order, unb) == methods[n - 1]:
-                log("Время не встало — записываю ещё раз")
-            elif n:
-                log(f"Время не встало — пробую запись: порядок {names[order]}" + (", с ключом разблокировки" if unb else ""))
+        for n, (order, unb) in enumerate(self.DT_METHODS):
+            if n:
+                log("Время не встало — записываю ещё раз" + (" (с ключом разблокировки)" if unb else ""))
+            self._to_second_start()
             try:
                 self.datetime_write(order=order, unblock=unb)
             except ModbusError as e:
@@ -366,16 +372,23 @@ class MK201:
                 if diff <= tol or time.time() - t0 >= wait:
                     break
             if diff <= tol:
-                if MK201.dt_method != (order, unb) and (order, unb) != ("hms", False):
-                    log(f"Время записалось так: порядок {names[order]}" + (", с ключом разблокировки" if unb else "")
-                        + " — дальше пишу так же")
-                MK201.dt_method = (order, unb)
-                return True, board, diff
+                time.sleep(confirm)                      # ещё раз: не применила ли плата запоздавшую прошлую запись
+                board2, diff2 = self.datetime_diff()
+                if diff2 <= tol:
+                    return True, board2, diff2
+                log(f"  через {confirm:g} с время платы {self._fmt(board2)} — разошлось на {diff2:.0f} с, записываю ещё раз")
+                board, diff = board2, diff2
+                continue
             try:
                 log(f"  в регистрах записи 1042 ×6 сейчас: {self.read_regs(ADDR_DATETIME_SET, 6)}")
             except Exception:
                 pass
         return False, board, diff
+
+    @staticmethod
+    def _fmt(t):
+        y, mo, d, h, mi, s = t
+        return f"{d:02d}.{mo:02d}.{y} {h:02d}:{mi:02d}:{s:02d}"
 
     # ---- заводские данные ----
     def unblock(self):

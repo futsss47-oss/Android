@@ -1966,7 +1966,7 @@ class App(ManualMixin):
                        svc_port=self.port("port") if v["conn_mode"] == "Service Port" else "",
                        svc_baud=int(v["baud"] or 115200), svc_unit=int(v["unit"] or 1))
             if sim:
-                cfg.update(ai_settle=0, ao_settle=0, reassert_settle=0, psu_settle=0, dio_on=0, dio_volt=0,
+                cfg.update(step_pause=0, ai_settle=0, ao_settle=0, reassert_settle=0, psu_settle=0, dio_on=0, dio_volt=0,
                            cal_settle=0, power_settle=0, relay_settle=0, gen_margin=0)
             self.last_protocol = out
             if not sim and (self.gen is not None or self.psu is not None) and not self.ilock.acquire(timeout=2):

@@ -1258,8 +1258,13 @@ class Runner:
         sel = [(k, t, fns[k]) for k, t in self.TABLE if k in steps]
         done = 0
         try:
+            pause = float(self.cfg.get("step_pause", 1.0) or 0)
             for n_, (key, title, fn) in enumerate(sel, 1):
                 self.chk()
+                if n_ > 1 and pause > 0:                 # 1.38: пауза между шагами («Настройки → Прогон»)
+                    t_end = time.time() + pause
+                    while time.time() < t_end:
+                        self.chk(); time.sleep(0.1)
                 self.pos = (n_, len(sel), title)
                 self.hook("progress", done, len(sel))
                 self.hook("phase", title)
