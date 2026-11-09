@@ -1743,23 +1743,54 @@ class App(ManualMixin):
                 continue
         return None, None
 
+    JOURNAL_HEAD = ["Дата", "Время", "Номер изделия", "Серийный в плате", "Оператор", "Заключение",
+                    "Не пройдено", "Выполнялись шаги", "Протокол", "Версия программы"]
+    JOURNAL_WIDTH = [11, 9, 19, 14, 22, 30, 40, 60, 60, 30]
+
     def journal(self, cfg, res, steps):
-        """Журнал плат (CSV, открывается в Excel): дата, номер, заключение, что не прошло, протокол."""
-        path = os.path.join(self.proto_root(), "журнал_плат.csv")
+        """Журнал плат: дата, номер, заключение, что не прошло, протокол.
+        09.11.2026 (1.40): файл Excel «журнал_плат.xlsx» — номера записаны ТЕКСТОМ. В прежнем CSV Excel превращал
+        16-значный номер изделия в число (1,00201E+15) и терял последнюю цифру (Excel хранит 15 цифр).
+        Строки прежнего «журнал_плат.csv» при первой записи переносятся в новый файл (в CSV цифры целые)."""
+        from openpyxl import Workbook, load_workbook
+        from openpyxl.styles import Font
+        path = os.path.join(self.proto_root(), "журнал_плат.xlsx")
+        old_csv = os.path.join(self.proto_root(), "журнал_плат.csv")
         allsteps = res.get("steps_all") or res.get("steps", {})
         bad = [STEP_NAMES.get(k, k) for k, v in allsteps.items() if v in ("fail", "warn")]
         row = [time.strftime("%d.%m.%Y"), time.strftime("%H:%M:%S"), cfg.get("protocol_number", ""), cfg.get("serial", ""),
                cfg.get("operator", ""), res.get("conclusion", "остановлено" if res.get("stopped") else ""),
                ", ".join(bad), ", ".join(STEP_NAMES.get(k, k) for k in steps), res.get("protocol", ""), VERSION]
+
+        def put(ws, values):
+            ws.append([str(v) if v is not None else "" for v in values])
+            for c in ws[ws.max_row]:
+                c.number_format = "@"                    # текст: номер не превратится в 1,00201E+15
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            new = not os.path.exists(path)
-            with open(path, "a", newline="", encoding="utf-8-sig") as f:
-                w = csv.writer(f, delimiter=";")
-                if new:
-                    w.writerow(["Дата", "Время", "Номер изделия", "Серийный в плате", "Оператор", "Заключение",
-                                "Не пройдено", "Выполнялись шаги", "Протокол", "Версия программы"])
-                w.writerow(row)
+            if os.path.exists(path):
+                wb = load_workbook(path); ws = wb.active
+            else:
+                wb = Workbook(); ws = wb.active; ws.title = "Журнал плат"
+                put(ws, self.JOURNAL_HEAD)
+                for c in ws[1]:
+                    c.font = Font(bold=True)
+                for i, w in enumerate(self.JOURNAL_WIDTH, 1):
+                    ws.column_dimensions[ws.cell(1, i).column_letter].width = w
+                ws.freeze_panes = "A2"
+                if os.path.exists(old_csv):              # прежний журнал — перенести (цифры в CSV целые)
+                    try:
+                        with open(old_csv, encoding="utf-8-sig", newline="") as f:
+                            rows = list(csv.reader(f, delimiter=";"))
+                        for r_ in rows[1:]:
+                            if any(x.strip() for x in r_):
+                                put(ws, r_)
+                        self.ui.log(f"Журнал плат: из журнал_плат.csv перенесено строк — {len(rows) - 1}", "ok")
+                    except Exception as e:
+                        self.ui.log(f"Журнал плат: прежний CSV не перенесён ({e})", "warn")
+            put(ws, row)
+            ws.auto_filter.ref = f"A1:J{ws.max_row}"
+            wb.save(path)
         except PermissionError:
             self.ui.log("Журнал плат открыт в Excel — строка не записана (закройте файл)", "warn")
         except Exception as e:
