@@ -399,14 +399,17 @@ class Protocol:
         # подписи
         self._merge(ws, r, 1, r, 7, "Измерения провели:", box=False, h="left", bold=True, size=10, wrap=False)
         self._height(ws, r, 16.0); r += 1
-        for fio, dt in ((d["operator"], f"/ {d['op_date']}" if d["op_date"] else "/"), ("", "/")):
-            self._merge(ws, r, 1, r, 4, "Регулировщик РЭАиП" if fio else None, box=False, size=9)
-            self._merge(ws, r, 5, r, 7, dt, box=False, size=9, h="left")
+        # 11.11.2026 (1.42): должность — «Оператор»; место подписи (D:E) отдельно, «/ дата» после него (F:G) —
+        # раньше дата стояла сразу за должностью, на месте подписи.
+        for pos, fio, dt in (("Оператор", d["operator"], f"/ {d['op_date']}" if d["op_date"] else "/"), (None, "", "/")):
+            self._merge(ws, r, 1, r, 3, pos if (fio or d["op_date"]) else None, box=False, size=9)
+            self._merge(ws, r, 4, r, 5, None, box=False, size=9)
+            self._merge(ws, r, 6, r, 7, dt, box=False, size=9, h="left")
             self._merge(ws, r, 9, r, 13, fio or None, box=False, size=9)
-            for c in list(range(1, 5)) + list(range(9, 14)):
+            for c in list(range(1, 4)) + [4, 5] + list(range(9, 14)):
                 ws.cell(r, c).border = Border(bottom=THIN)
             self._height(ws, r, 20.0); r += 1
-            for c1, c2, t in ((1, 4, "должность"), (5, 7, "подпись, дата"), (9, 13, "ФИО")):
+            for c1, c2, t in ((1, 3, "должность"), (4, 5, "подпись"), (6, 7, "дата"), (9, 13, "ФИО")):
                 self._merge(ws, r, c1, r, c2, t, box=False, size=7, italic=True)
             self._height(ws, r, 10.0); r += 1
         last = r - 1
