@@ -399,19 +399,20 @@ class Protocol:
         # подписи
         self._merge(ws, r, 1, r, 7, "Измерения провели:", box=False, h="left", bold=True, size=10, wrap=False)
         self._height(ws, r, 16.0); r += 1
-        # 11.11.2026 (1.42): должность — «Оператор»; место подписи (D:E) отдельно, «/ дата» после него (F:G) —
-        # раньше дата стояла сразу за должностью, на месте подписи.
-        for pos, fio, dt in (("Оператор", d["operator"], f"/ {d['op_date']}" if d["op_date"] else "/"), (None, "", "/")):
-            self._merge(ws, r, 1, r, 3, pos if (fio or d["op_date"]) else None, box=False, size=9)
-            self._merge(ws, r, 4, r, 5, None, box=False, size=9)
-            self._merge(ws, r, 6, r, 7, dt, box=False, size=9, h="left")
-            self._merge(ws, r, 9, r, 13, fio or None, box=False, size=9)
-            for c in list(range(1, 4)) + [4, 5] + list(range(9, 14)):
-                ws.cell(r, c).border = Border(bottom=THIN)
+        # 1.43: четыре отдельные линии с промежутками — должность (A:C), подпись (E:F), дата (H:I), ФИО (K:M);
+        # под каждой своя подпись. D, G, J — промежутки без линии.
+        fields = ((1, 3, "должность"), (5, 6, "подпись"), (8, 9, "дата"), (11, 13, "ФИО"))
+        for pos, fio, dt in (("Оператор", d["operator"], d["op_date"]), (None, None, None)):
+            vals = (pos if (fio or dt) else None, None, dt or None, fio or None)
+            for (c1, c2, _), v in zip(fields, vals):
+                self._merge(ws, r, c1, r, c2, v, box=False, size=9)
+                for c in range(c1, c2 + 1):
+                    ws.cell(r, c).border = Border(bottom=THIN)
             self._height(ws, r, 20.0); r += 1
-            for c1, c2, t in ((1, 3, "должность"), (4, 5, "подпись"), (6, 7, "дата"), (9, 13, "ФИО")):
+            for c1, c2, t in fields:
                 self._merge(ws, r, c1, r, c2, t, box=False, size=7, italic=True)
             self._height(ws, r, 10.0); r += 1
+            self._height(ws, r, 8.0); r += 1
         last = r - 1
 
         self._page_setup(ws, page1_end, last)
