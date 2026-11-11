@@ -375,9 +375,18 @@ class MK201:
 
     @staticmethod
     def mac_to_regs(mac: str):
-        b = [int(x, 16) for x in mac.replace("-", ":").split(":")]
-        if len(b) != 6 or any(x < 0 or x > 255 for x in b):
-            raise ValueError("Неверный формат MAC")
+        """«00:16:D6:FF:F5:FD» -> 3 регистра. 11.11.2026 (1.41): понятная ошибка вместо
+        «invalid literal for int() with base 16: ''» (пустой MAC или лишнее двоеточие)."""
+        text = str(mac or "").strip()
+        if not text:
+            raise ValueError("MAC-адрес не указан")
+        parts = text.replace("-", ":").split(":")
+        try:
+            b = [int(x, 16) for x in parts]
+        except ValueError:
+            b = []
+        if len(parts) != 6 or len(b) != 6 or any(not 1 <= len(x) <= 2 for x in parts):
+            raise ValueError(f"Неверный MAC «{text}»: нужно 6 пар знаков 0–9, A–F через двоеточие, например 00:16:D6:FF:F5:FD")
         return [(b[1] << 8) | b[0], (b[3] << 8) | b[2], (b[5] << 8) | b[4]]
 
     @staticmethod

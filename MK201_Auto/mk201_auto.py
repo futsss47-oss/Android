@@ -1831,9 +1831,25 @@ class App(ManualMixin):
             messagebox.showinfo("MK201 Auto", "Идёт подключение приборов — подождите несколько секунд."); return
         if not self.v["operator"].get().strip():
             self.add_log("ВНИМАНИЕ: не выбран оператор — строка «Измерения провели» в протоколе останется прежней", "warn")
+        run_steps = list(only) if only else [k for k, _ in STEPS if self.steps[k].get()]
+        if "serial" in run_steps and not self.sim.get():          # 1.41: MAC проверяем до начала прогона
+            mac = self.v["mac"].get().strip()
+            try:
+                MK201.mac_to_regs(mac)
+            except ValueError as e:
+                if not mac and getattr(self, "_mac_state", "") in ("loading", "none") and self.v["mac_book"].get().strip():
+                    why = "Журнал MAC-адресов ещё загружается — подождите несколько секунд и нажмите СТАРТ снова."
+                elif not mac and self.v["mac_book"].get().strip():
+                    why = ("MAC-адрес не указан: этого номера нет в журнале MAC-адресов (или журнал не прочитан).\n"
+                           "Введите MAC вручную на вкладке «Проверка» или снимите галочку «Серийный № и MAC».")
+                else:
+                    why = f"{e}.\nВведите MAC на вкладке «Проверка» или снимите галочку «Серийный № и MAC»."
+                self.add_log(f"СТАРТ отменён: {str(e)}", "err")
+                messagebox.showwarning("MK201 Auto", why)
+                return
         self.m_dio_power(False)                    # 24 В ручного режима на CH2 — выключить, дальше CH2 у сценария
         self.manual_close()
-        self.run_steps = list(only) if only else [k for k, _ in STEPS if self.steps[k].get()]
+        self.run_steps = run_steps
         self.retry_mode = bool(only)              # «Повторить непройденные»: AI/AO — только каналы вне допуска
         self.running = True; self.apply_lock()
         self.save(); self.ui.stopped = False; self.ui.skip = False
