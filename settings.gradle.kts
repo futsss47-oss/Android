@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "OvertimeTracker"
-include(":app", ":domain")
+include(":app", ":domain", ":game")

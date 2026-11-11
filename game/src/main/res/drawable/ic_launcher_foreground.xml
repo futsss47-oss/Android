@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ведёрко попкорна из игры, вписано в безопасную зону адаптивной иконки. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="1.25"
+        android:scaleY="1.25"
+        android:translateX="24"
+        android:translateY="23">
+        <path android:fillColor="#E6AD35" android:pathData="M9,18a6,6 0,1 0,12 0a6,6 0,1 0,-12 0z" />
+        <path android:fillColor="#F0E0BD" android:pathData="M17,13a7,7 0,1 0,14 0a7,7 0,1 0,-14 0z" />
+        <path android:fillColor="#E6AD35" android:pathData="M27,18a6,6 0,1 0,12 0a6,6 0,1 0,-12 0z" />
+        <path android:fillColor="#F0E0BD" android:pathData="M16,20a4,4 0,1 0,8 0a4,4 0,1 0,-8 0z" />
+        <path android:fillColor="#F0E0BD" android:pathData="M25,21a4,4 0,1 0,8 0a4,4 0,1 0,-8 0z" />
+        <path android:fillColor="#F0E0BD" android:pathData="M11,22h26l-3,21H14z" />
+        <path android:fillColor="#D9502F" android:pathData="M15.5,22h4.5l0.8,21h-3.4zM22,22h4v21h-4zM28,22h4.5l-1.9,21h-3.4z" />
+    </group>
+</vector>

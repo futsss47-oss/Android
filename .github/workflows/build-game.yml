@@ -1,0 +1,78 @@
+name: Build game APK
+
+on:
+  push:
+    branches: [main, master, claude/serene-rubin-5slomw]
+    paths:
+      - 'game/**'
+      - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - '.github/workflows/build-game.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: |
+            17
+            21
+
+      - name: Android SDK
+        run: |
+          if [ -z "${ANDROID_HOME:-}" ] || [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            export ANDROID_HOME="$HOME/android-sdk"
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            curl -sSLo /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+            mv /tmp/cmdtools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+            echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          fi
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Права на запуск gradlew
+        run: chmod +x gradlew
+
+      - name: Debug APK игры
+        run: |
+          set -o pipefail
+          if ! ./gradlew :game:assembleDebug 2>&1 | tee "$RUNNER_TEMP/game.log"; then
+            grep -E "^e: |error:|Exception|Caused by|FAILED|What went wrong|> " -A 2 "$RUNNER_TEMP/game.log" | head -60 | while IFS= read -r line; do
+              echo "::error title=Сборка игры::$line"
+            done
+            exit 1
+          fi
+          cp game/build/outputs/apk/debug/game-debug.apk "$RUNNER_TEMP/kinozakuski.apk"
+
+      - name: Выложить APK игры
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinozakuski-apk
+          path: ${{ runner.temp }}/kinozakuski.apk
+          if-no-files-found: error
+
+      # Прямая ссылка на APK, чтобы скачать с телефона без распаковки архива.
+      - name: Обновить предварительный релиз
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=kinozakuski-latest
+          TITLE="Кинозакуски, сборка $GITHUB_RUN_NUMBER"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$RUNNER_TEMP/kinozakuski.apk" --clobber
+            gh release edit "$TAG" --title "$TITLE"
+          else
+            gh release create "$TAG" "$RUNNER_TEMP/kinozakuski.apk" --prerelease --target "$GITHUB_SHA" --title "$TITLE" --notes "Тестовая сборка игры. Подписана debug-ключом, не для магазина."
+          fi
