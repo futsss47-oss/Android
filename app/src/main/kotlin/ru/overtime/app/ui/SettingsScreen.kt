@@ -1,5 +1,8 @@
 package ru.overtime.app.ui
 
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import android.Manifest
 import android.os.Build
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -188,8 +191,14 @@ fun SettingsScreen(vm: AppViewModel) {
     // Разрешения могут поменяться в системных настройках: перепроверяем при возврате на экран.
     var permTick by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { permTick++ }
+    val activityOk = remember(permTick) { Perms.hasActivity(ctx) }
     val permsOk = remember(permTick) {
-        Perms.hasFine(ctx) && Perms.hasBackground(ctx) && Perms.hasNotifications(ctx)
+        Perms.hasFine(ctx) && Perms.hasBackground(ctx) && Perms.hasNotifications(ctx) && activityOk
+    }
+    val activityLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        permTick++
+        // Новое разрешение: перезапустить слежку, чтобы подписаться на распознавание движения.
+        vm.saveSettings(vm.settings.value)
     }
 
     if (showMap) {
@@ -303,8 +312,50 @@ fun SettingsScreen(vm: AppViewModel) {
                 IntField("Радиус «я на работе»", draft.enterRadiusM, "м") { draft = draft.copy(enterRadiusM = it) }
                 IntField("Радиус «я ушёл»", draft.exitRadiusM, "м") { draft = draft.copy(exitRadiusM = it) }
                 IntField("Игнорировать замеры хуже", draft.maxAccuracyM, "м") { draft = draft.copy(maxAccuracyM = it) }
-                IntField("Опрос геопозиции раз в", draft.pollIntervalMinutes, "мин") {
+                IntField("Контрольный замер в сверхурочную раз в", draft.pollIntervalMinutes, "мин") {
                     draft = draft.copy(pollIntervalMinutes = it)
+                }
+                Hint(
+                    "Днём в смену геопозиция не опрашивается. Во время сверхурочной — редкий контрольный замер, " +
+                        "а когда вы пошли, поехали или пропал рабочий Wi‑Fi, — точные замеры раз в 1–1,5 минуты, " +
+                        "не дольше 10 минут.",
+                )
+            }
+
+            // ---- рабочий Wi‑Fi ----
+            SettingsGroup(
+                title = "Рабочий Wi‑Fi",
+                summary = if (draft.workWifiBssids.isEmpty()) {
+                    "Не задан"
+                } else {
+                    (draft.workWifiName ?: "Сеть") + ", точек доступа: ${draft.workWifiBssids.size}"
+                },
+            ) {
+                Hint(
+                    "Когда рабочая сеть пропадает, приложение сразу проверяет геопозицию и точнее ставит время ухода. " +
+                        "Сама сеть не значит, что вы на работе: решают координаты и радиус зоны.",
+                )
+                FilledTonalButton(
+                    onClick = {
+                        val (ssid, bssid) = currentWifi(ctx)
+                        if (bssid == null) {
+                            message = "Не вижу подключённый Wi‑Fi. Подключитесь к рабочей сети, включите геолокацию и попробуйте снова."
+                        } else {
+                            draft = draft.copy(
+                                workWifiBssids = draft.workWifiBssids + bssid,
+                                workWifiName = ssid ?: draft.workWifiName,
+                            )
+                            message = "Добавлена точка доступа ${ssid ?: ""}. Нажмите «Сохранить». " +
+                                "Если на работе несколько роутеров, добавьте сеть рядом с каждым."
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Запомнить текущую сеть") }
+                if (draft.workWifiBssids.isNotEmpty()) {
+                    OutlinedButton(
+                        onClick = { draft = draft.copy(workWifiBssids = emptySet(), workWifiName = null) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Забыть рабочий Wi‑Fi") }
                 }
             }
 
@@ -542,6 +593,13 @@ fun SettingsScreen(vm: AppViewModel) {
                 title = "Фоновая работа",
                 summary = if (permsOk) "Разрешения выданы" else "Нужны разрешения",
             ) {
+                if (!activityOk && Build.VERSION.SDK_INT >= 29) {
+                    Hint("Разрешите «Физическую активность»: приложение поймёт, когда вы пошли или поехали, и точнее поставит время ухода.")
+                    FilledTonalButton(
+                        onClick = { activityLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Разрешить распознавание движения") }
+                }
                 BackgroundWorkTips()
             }
 
@@ -581,4 +639,17 @@ private fun tryMoney(date: LocalDate, minutes: Int, s: Settings): String = try {
     formatMoney(Calculator.money(date, minutes, s))
 } catch (e: Exception) {
     "ошибка"
+}
+
+/**
+ * Название и адрес (BSSID) текущей Wi‑Fi сети. Нужны разрешение на геолокацию и включённая геолокация,
+ * иначе Android скрывает адрес. Возвращает (null, null), если Wi‑Fi не подключён.
+ */
+@Suppress("DEPRECATION")
+private fun currentWifi(ctx: android.content.Context): Pair<String?, String?> {
+    val info = ctx.applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)?.connectionInfo
+        ?: return null to null
+    val bssid = info.bssid?.lowercase()?.takeIf { it != "02:00:00:00:00:00" && it != "00:00:00:00:00:00" }
+    val ssid = info.ssid?.removeSurrounding("\"")?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
+    return ssid to bssid
 }

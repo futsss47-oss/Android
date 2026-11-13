@@ -27,6 +27,7 @@ import ru.overtime.app.data.SessionEntity
 import ru.overtime.app.data.TimeConv
 import ru.overtime.app.location.GeofenceHelper
 import ru.overtime.app.location.Perms
+import ru.overtime.app.location.Tracker
 import ru.overtime.app.reminder.MonthReminder
 import ru.overtime.domain.DayKind
 import ru.overtime.domain.MonthCalc
@@ -86,7 +87,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         // Закрыть сессию, у которой окно сверхурочной уже закончилось, пока приложение не работало.
-        viewModelScope.launch(Dispatchers.IO) { app.tick() }
+        // Затем включить или выключить слежку: приложение открыто, служба точно запустится.
+        viewModelScope.launch(Dispatchers.IO) {
+            app.tick()
+            Tracker.reconcile(app)
+        }
         refreshGeofence()
     }
 
@@ -105,6 +110,11 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         app.settingsRepo.save(s)
         GeofenceHelper.register(app, s)
         MonthReminder.schedule(app, s)
+        // Новые часы смены или Wi‑Fi: пересчитать будильник и перезапустить слежку с новыми настройками.
+        viewModelScope.launch(Dispatchers.IO) {
+            app.stopService(android.content.Intent(app, ru.overtime.app.location.TrackingService::class.java))
+            Tracker.reconcile(app)
+        }
     }
 
     /** Отметить день отсутствия (null — работал). */

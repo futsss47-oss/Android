@@ -50,6 +50,24 @@ object Windows {
     fun containing(t: LocalDateTime, s: Settings): TimeWindow? =
         forDate(t.toLocalDate(), s).firstOrNull { !t.isBefore(it.start) && t.isBefore(it.end) }
 
+    /**
+     * Ближайшее начало окна сверхурочной строго позже [from] (до 9 дней вперёд), без ночных «хвостов»,
+     * которые требуют присутствия с вечера. Нужно, чтобы разбудить приложение к концу смены.
+     */
+    fun nextStart(from: LocalDateTime, s: Settings): LocalDateTime? {
+        var date = from.toLocalDate()
+        repeat(9) {
+            val start = forDate(date, s)
+                .filter { it.needsPresenceBefore == null }
+                .map { it.start }
+                .filter { it.isAfter(from) }
+                .minOrNull()
+            if (start != null) return start
+            date = date.plusDays(1)
+        }
+        return null
+    }
+
     private fun windowReachesMidnight(date: LocalDate, s: Settings): Boolean {
         val rule = s.ruleFor(date)
         if (!rule.workday) return s.weekendAllOvertime

@@ -47,6 +47,12 @@ data class TrackerState(
     val lastClosedId: Long? = null,
     val lastClosedStart: LocalDateTime? = null,
     val lastClosedEnd: LocalDateTime? = null,
+    /**
+     * Момент, когда, вероятно, начался уход: пропал рабочий Wi‑Fi, человек пошёл или поехал, система сообщила
+     * о выходе из геозоны. Сам по себе ничего не закрывает: если подтвердится, что человек вне зоны, концом
+     * сверхурочной станет это время, а не последний замер «на работе». Замер «на работе» его сбрасывает.
+     */
+    val exitHint: LocalDateTime? = null,
 ) {
     val atWork: Boolean get() = presenceSince != null
 }
@@ -80,7 +86,11 @@ class OvertimeEngine(
 ) {
     fun state(): TrackerState = store.load()
 
-    fun onReading(now: LocalDateTime, reading: Reading): TrackerState {
+    /**
+     * [confirmNow] — замер надёжный (точный GPS после сигнала об уходе или событие геозоны от системы),
+     * второго подтверждающего замера ждать не нужно.
+     */
+    fun onReading(now: LocalDateTime, reading: Reading, confirmNow: Boolean = false): TrackerState {
         val s = settings()
         var st = closeIfWindowOver(store.load(), now, s)
 
@@ -92,24 +102,28 @@ class OvertimeEngine(
                     outsideStreak = 0,
                     lastInside = now,
                     presenceSince = st.presenceSince ?: now,
+                    exitHint = null,
                 )
                 if (st.openId == null) st = tryOpen(st, now, s)
             }
 
             Reading.OUTSIDE -> {
                 val streak = st.outsideStreak + 1
-                val confirmed = streak >= CONFIRM_READINGS
+                val confirmed = confirmNow || streak >= CONFIRM_READINGS
                 val openId = st.openId
                 val openStart = st.openStart
                 st = if (openId != null && openStart != null) {
                     if (confirmed) {
-                        val end = laterOf(st.lastInside ?: openStart, openStart)
+                        // Конец — момент первого сигнала об уходе, если он был; иначе последний замер на работе.
+                        val hint = st.exitHint?.let { earlierOf(it, now) }
+                        val end = laterOf(hint ?: st.lastInside ?: openStart, openStart)
                         gateway.close(openId, end)
                         st.copy(
                             openId = null,
                             openStart = null,
                             outsideStreak = 0,
                             presenceSince = null,
+                            exitHint = null,
                             lastClosedId = openId,
                             lastClosedStart = openStart,
                             lastClosedEnd = end,
@@ -118,7 +132,7 @@ class OvertimeEngine(
                         st.copy(outsideStreak = streak)
                     }
                 } else if (confirmed) {
-                    st.copy(outsideStreak = 0, presenceSince = null)
+                    st.copy(outsideStreak = 0, presenceSince = null, exitHint = null)
                 } else {
                     st.copy(outsideStreak = streak)
                 }
@@ -126,6 +140,22 @@ class OvertimeEngine(
         }
         store.save(st)
         return st
+    }
+
+    /**
+     * Сигнал «похоже, человек уходит» в момент [at]. Запоминается самый ранний сигнал после последнего
+     * замера на работе; учитывается, только если человек на работе.
+     */
+    fun onExitHint(at: LocalDateTime): TrackerState {
+        val st = store.load()
+        if (!st.atWork) return st
+        val lastInside = st.lastInside
+        if (lastInside != null && at.isBefore(lastInside)) return st
+        val current = st.exitHint
+        if (current != null && !at.isBefore(current)) return st
+        val next = st.copy(exitHint = at)
+        store.save(next)
+        return next
     }
 
     /** Вызывать по таймеру, чтобы сессия закрылась по концу окна, даже если замеров нет. */

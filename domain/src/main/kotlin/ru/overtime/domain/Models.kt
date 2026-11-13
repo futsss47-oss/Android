@@ -65,7 +65,8 @@ data class Settings(
     val minOvertimeMinutes: Int = 10,
     /** Если вернулись на работу не позже чем через N минут, сессия продолжается. */
     val mergeGapMinutes: Int = 60,
-    val pollIntervalMinutes: Int = 10,
+    /** Редкий контрольный замер во время сверхурочной, мин. При движении замеры чаще, но недолго. */
+    val pollIntervalMinutes: Int = 15,
     val enterRadiusM: Int = 100,
     val exitRadiusM: Int = 200,
     /** Замеры с худшей точностью отбрасываются. */
@@ -106,6 +107,13 @@ data class Settings(
     val vacationEarnings12m: Double? = null,
     /** Начисления за 2 предыдущих года для больничного; null — оценить по приложению. */
     val sickEarnings2y: Double? = null,
+    /**
+     * Рабочий Wi‑Fi: адреса точек доступа (BSSID). Пропажа этой сети — сигнал проверить геопозицию;
+     * сама сеть не доказывает, что человек на работе (решают координаты и радиус зоны).
+     */
+    val workWifiBssids: Set<String> = emptySet(),
+    /** Название рабочей сети для показа в настройках. */
+    val workWifiName: String? = null,
     /** Цвета из обоев (Material You) вместо фирменных. */
     val wallpaperColors: Boolean = false,
 ) {

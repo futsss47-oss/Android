@@ -100,7 +100,13 @@ class OvertimeApp : Application() {
      * Обрабатывает замер геопозиции. [biasInside] = true сразу после события входа в геозону:
      * в «серой зоне» между радиусами считаем, что человек на работе.
      */
-    fun processLocation(lat: Double, lon: Double, accuracyM: Double, biasInside: Boolean): TrackerState {
+    fun processLocation(
+        lat: Double,
+        lon: Double,
+        accuracyM: Double,
+        biasInside: Boolean,
+        confirmNow: Boolean = false,
+    ): TrackerState {
         val state = synchronized(lock) {
             val s = settingsRepo.current()
             val workLat = s.workLat
@@ -109,12 +115,15 @@ class OvertimeApp : Application() {
             val distance = Geo.distanceMeters(lat, lon, workLat, workLon)
             val wasAtWork = biasInside || engine.state().atWork
             val reading: Reading = Geo.classify(distance, accuracyM, wasAtWork, s)
-            engine.onReading(LocalDateTime.now(), reading)
+            engine.onReading(LocalDateTime.now(), reading, confirmNow)
         }
         // Таймер идущей сверхурочной на виджете обновляется с каждым замером.
         WidgetUpdater.request(this)
         return state
     }
+
+    /** Сигнал «похоже, человек уходит» (пропал рабочий Wi‑Fi, начал движение, событие выхода из зоны). */
+    fun exitHint(at: LocalDateTime): TrackerState = synchronized(lock) { engine.onExitHint(at) }
 
     private fun createChannels() {
         val nm = getSystemService(NotificationManager::class.java)

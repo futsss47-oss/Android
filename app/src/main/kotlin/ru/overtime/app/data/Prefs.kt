@@ -103,6 +103,8 @@ object SettingsJson {
         s.vacationEarnings12m?.let { o.put("vacEarn", it) }
         s.sickEarnings2y?.let { o.put("sickEarn", it) }
         o.put("wallpaper", s.wallpaperColors)
+        o.put("wifi", org.json.JSONArray(s.workWifiBssids.toList()))
+        s.workWifiName?.let { o.put("wifiName", it) }
         return o.toString()
     }
 
@@ -154,6 +156,9 @@ object SettingsJson {
             vacationEarnings12m = if (o.has("vacEarn")) o.getDouble("vacEarn") else null,
             sickEarnings2y = if (o.has("sickEarn")) o.getDouble("sickEarn") else null,
             wallpaperColors = o.optBoolean("wallpaper", d.wallpaperColors),
+            workWifiBssids = o.optJSONArray("wifi")?.let { arr -> (0 until arr.length()).map { arr.getString(it) }.toSet() }
+                ?: d.workWifiBssids,
+            workWifiName = if (o.has("wifiName")) o.getString("wifiName") else null,
         )
     }
 
