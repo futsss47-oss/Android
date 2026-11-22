@@ -9,12 +9,16 @@ import android.provider.Settings
 import android.graphics.Color
 import android.speech.RecognizerIntent
 import android.widget.*
+import android.app.AlertDialog
+import kotlin.concurrent.thread
 import java.util.Locale
 
 class MainActivity : Activity() {
  private lateinit var command: EditText
  private lateinit var result: TextView
  private val speechRequest = 100
+ private lateinit var serverUrl: EditText
+ private lateinit var accessToken: EditText
 
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
@@ -23,7 +27,7 @@ class MainActivity : Activity() {
    setPadding(36, 48, 36, 24)
    setBackgroundColor(Color.rgb(245, 247, 250))
   }
-  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.2"; textSize = 24f; setTextColor(Color.BLACK) }
+  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.3"; textSize = 24f; setTextColor(Color.BLACK) }
   val instructions = TextView(this).apply {
    text = "Голос или текст: 2гис адрес; открыть Telegram; настройки; назад; домой; прокрути вниз. Для управления экраном включи специальную возможность."
    textSize = 15f; setPadding(0, 20, 0, 20)
@@ -33,10 +37,43 @@ class MainActivity : Activity() {
   val run = Button(this).apply { text = "Выполнить команду" }
   val voice = Button(this).apply { text = "🎤 Сказать команду" }
   val access = Button(this).apply { text = "Включить управление экраном" }
+  val prefs = getSharedPreferences("ai_proxy", MODE_PRIVATE)
+  serverUrl = EditText(this).apply { hint = "HTTPS-адрес личного сервера"; setSingleLine(true); setText(prefs.getString("url", "")) }
+  accessToken = EditText(this).apply { hint = "Токен доступа (не ключ DeepSeek)"; setSingleLine(true); inputType = 129; setText(prefs.getString("token", "")) }
+  val save = Button(this).apply { text = "Сохранить подключение" }
+  val ai = Button(this).apply { text = "Спросить DeepSeek (с подтверждением)" }
   root.addView(heading); root.addView(instructions); root.addView(command)
-  root.addView(run); root.addView(voice); root.addView(access); root.addView(result)
+  root.addView(run); root.addView(voice); root.addView(access)
+  root.addView(serverUrl); root.addView(accessToken); root.addView(save); root.addView(ai); root.addView(result)
   setContentView(ScrollView(this).apply { addView(root) })
   run.setOnClickListener { runCommand(command.text.toString()) }
+  save.setOnClickListener {
+   prefs.edit().putString("url", serverUrl.text.toString().trim()).putString("token", accessToken.text.toString().trim()).apply()
+   result.text = "Подключение сохранено только на телефоне"
+  }
+  ai.setOnClickListener {
+   val text = command.text.toString().trim()
+   if (text.isBlank()) { result.text = "Сначала введите команду"; return@setOnClickListener }
+   val url = serverUrl.text.toString()
+   val token = accessToken.text.toString()
+   result.text = "DeepSeek обрабатывает команду..."
+   thread {
+    try {
+     val proposal = DeepSeekClient.parse(url, token, text)
+     runOnUiThread {
+      if (proposal.action == "unknown") { result.text = "Не удалось распознать команду"; return@runOnUiThread }
+      AlertDialog.Builder(this)
+       .setTitle("Подтвердить действие?")
+       .setMessage(proposal.describe())
+       .setNegativeButton("Отмена") { _, _ -> result.text = "Отменено" }
+       .setPositiveButton("Выполнить") { _, _ ->
+        try { executeAi(proposal); result.text = "Выполнено: ${proposal.describe()}" }
+        catch (e: Exception) { result.text = "Ошибка: ${e.message}" }
+       }.show()
+     }
+    } catch (e: Exception) { runOnUiThread { result.text = "Ошибка DeepSeek: ${e.message}" } }
+   }
+  }
   voice.setOnClickListener {
    try {
     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -86,6 +123,24 @@ class MainActivity : Activity() {
     startActivity(packageManager.getLaunchIntentForPackage(pkg) ?: throw IllegalArgumentException("Приложение не установлено или недоступно"))
    }
    else -> throw IllegalArgumentException("Неизвестная команда")
+  }
+ }
+ private fun executeAi(proposal: AiAction) {
+  when (proposal.action) {
+   "open_app" -> execute("открыть " + proposal.argument)
+   "open_maps" -> openUrl("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(proposal.argument))
+   "open_2gis" -> openUrl("https://2gis.ru/ufa/search/" + Uri.encode(proposal.argument))
+   "settings" -> when (proposal.argument) {
+    "bluetooth" -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+    "wifi" -> startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+    "general" -> startActivity(Intent(Settings.ACTION_SETTINGS))
+    else -> throw IllegalArgumentException("Недопустимые настройки")
+   }
+   "back" -> requireService(PhoneAccessibilityService.instance).goBack()
+   "home" -> requireService(PhoneAccessibilityService.instance).goHome()
+   "scroll_down" -> requireService(PhoneAccessibilityService.instance).scroll(true)
+   "scroll_up" -> requireService(PhoneAccessibilityService.instance).scroll(false)
+   else -> throw IllegalArgumentException("Неизвестное действие")
   }
  }
  private fun requireService(service: PhoneAccessibilityService?): PhoneAccessibilityService =
