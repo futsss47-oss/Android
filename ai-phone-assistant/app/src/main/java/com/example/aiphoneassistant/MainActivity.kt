@@ -142,6 +142,16 @@ class MainActivity : Activity() {
  }
 
  private fun openNamedTarget(raw: String): Boolean {
+  val click = Regex("""^(?:в приложении|открой(?: приложение)?)\s+(.+?)\s*,?\s+(?:и\s+)?нажми\s+(?:на\s+)?(?:кнопку\s+)?(.+)$""", RegexOption.IGNORE_CASE).matchEntire(raw.trim())
+  if (click != null) {
+   val name = click.groupValues[1].trim().trimEnd(',')
+   val label = click.groupValues[2].trim().trimEnd('.', '!', '?').trim('«', '»', '"')
+   val app = findLauncher(name) ?: throw IllegalArgumentException("Приложение «$name» не найдено")
+   val service = requireService(PhoneAccessibilityService.instance)
+   startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(app.packageName, app.name))
+   service.clickAfterLaunch(app.packageName, label)
+   return true
+  }
   val match = Regex("""^(?:открой|открыть|запусти)\s+(?:(приложение|сайт)\s+)?(.+)$""", RegexOption.IGNORE_CASE).matchEntire(raw.trim()) ?: return false
   val name = match.groupValues[2].trim().trimEnd('.', '!', '?').lowercase(Locale.ROOT)
   if (match.groupValues[1].lowercase(Locale.ROOT) == "сайт") {
@@ -153,12 +163,16 @@ class MainActivity : Activity() {
    openUrl("https://" + domain)
    return true
   }
+  val app = findLauncher(name) ?: return false
+  startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(app.packageName, app.name))
+  return true
+ }
+
+ private fun findLauncher(name: String): android.content.pm.ActivityInfo? {
   val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
   val matches = packageManager.queryIntentActivities(launcher, 0).filter { it.loadLabel(packageManager).toString().trim().equals(name, true) }
   if (matches.size > 1) throw IllegalArgumentException("Найдено несколько приложений с таким названием")
-  val app = matches.singleOrNull()?.activityInfo ?: return false
-  startActivity(launcher.setClassName(app.packageName, app.name))
-  return true
+  return matches.singleOrNull()?.activityInfo
  }
 
  private fun recognizeSpeech(requestCode: Int) {
