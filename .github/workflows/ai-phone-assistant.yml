@@ -1,7 +1,7 @@
 name: Build AI Phone Assistant APK
 on:
   push:
-    branches: [feature/ai-phone-assistant]
+    branches: [feature/ai-phone-assistant, feature/ai-phone-assistant-deepseek-03]
   workflow_dispatch:
 jobs:
   build:
