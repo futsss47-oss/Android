@@ -12,11 +12,11 @@ class MainActivity : Activity() {
   super.onCreate(savedInstanceState)
   val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(36,48,36,24); setBackgroundColor(Color.rgb(245,247,250)) }
   val heading = TextView(this).apply { text = "AI Phone Assistant · 0.1"; textSize = 24f; setTextColor(Color.BLACK) }
-  val hint = TextView(this).apply { text = "Команды: 2гис Вологодская 11; карты Москва; настройки; bluetooth; wifi; открыть Telegram"; textSize = 15f; setPadding(0,20,0,20) }
+  val instructionsView = TextView(this).apply { text = "Команды: 2гис Вологодская 11; карты Москва; настройки; bluetooth; wifi; открыть Telegram"; textSize = 15f; setPadding(0,20,0,20) }
   val command = EditText(this).apply { hint = "Введите команду"; setSingleLine(false); minLines = 2 }
   val result = TextView(this).apply { text = "Команды выполняются только после нажатия кнопки."; setPadding(0,20,0,0) }
   val run = Button(this).apply { text = "Выполнить команду" }
-  root.addView(heading); root.addView(hint); root.addView(command); root.addView(run); root.addView(result)
+  root.addView(heading); root.addView(instructionsView); root.addView(command); root.addView(run); root.addView(result)
   setContentView(root)
   run.setOnClickListener { try { execute(command.text.toString()); result.text = "Команда отправлена в Android" } catch(e: Exception) { result.text = "Не удалось выполнить: ${e.message}" } }
  }
