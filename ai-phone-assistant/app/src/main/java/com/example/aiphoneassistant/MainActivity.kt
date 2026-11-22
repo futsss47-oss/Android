@@ -19,7 +19,7 @@ class MainActivity : Activity() {
  private val aiSpeechRequest = 101
  private var aiBusy = false
  private var listening = false
- private lateinit var wake: ForegroundVoice
+ private val actions by lazy { PhoneActions(this) }
  private var visible = false
  private var session = 0
  private lateinit var toggle: Switch
@@ -31,7 +31,7 @@ class MainActivity : Activity() {
    setPadding(36, 48, 36, 24)
    setBackgroundColor(Color.rgb(245, 247, 250))
   }
-  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.5"; textSize = 24f; setTextColor(Color.BLACK) }
+  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.6"; textSize = 24f; setTextColor(Color.BLACK) }
   val instructions = TextView(this).apply {
    text = "Скажи команду или введи её текстом. Поддерживаемая команда выполнится после распознавания."
    textSize = 15f; setPadding(0, 20, 0, 20)
@@ -44,20 +44,17 @@ class MainActivity : Activity() {
   val settings = Button(this).apply { text = "Настройки" }
   val ai = Button(this).apply { text = "Выполнить через DeepSeek" }
   val prefs = getSharedPreferences("voice_mode", MODE_PRIVATE)
-  wake = ForegroundVoice(this, { phrase ->
-   if (visible && !listening && !aiBusy) {
-    command.setText(phrase)
-    askDeepSeek()
-   }
-  }, { message -> result.text = message })
   toggle = Switch(this).apply {
-   text = "Слушать «Дипсик» на этом экране"
-   isChecked = prefs.getBoolean("enabled", false)
+   text = "Слушать «Дипсик», даже когда приложение свёрнуто"
+   isChecked = prefs.getBoolean("background_enabled", false)
    setOnCheckedChangeListener { _, enabled ->
-    prefs.edit().putBoolean("enabled", enabled).apply()
+    prefs.edit().putBoolean("background_enabled", enabled).apply()
     if (enabled && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-     requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 201)
-    else refreshVoice()
+     requestPermissions(if (android.os.Build.VERSION.SDK_INT >= 33) arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.POST_NOTIFICATIONS) else arrayOf(android.Manifest.permission.RECORD_AUDIO), 201)
+    else {
+     refreshVoice()
+     if (enabled && android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 202)
+    }
    }
   }
   root.addView(heading); root.addView(toggle); root.addView(instructions); root.addView(command)
@@ -75,12 +72,13 @@ class MainActivity : Activity() {
  }
 
  private fun refreshVoice() {
-  wake.stop()
-  if (visible && toggle.isChecked && !listening &&
-   checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) wake.start()
+  val service = Intent(this, WakeService::class.java)
+  if (!toggle.isChecked || listening) stopService(service)
+  else if (visible && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+   startForegroundService(service)
  }
- override fun onResume() { super.onResume(); visible = true; refreshVoice() }
- override fun onPause() { visible = false; session++; aiBusy = false; wake.stop(); super.onPause() }
+ override fun onResume() { super.onResume(); visible = true; toggle.isChecked = getSharedPreferences("voice_mode", MODE_PRIVATE).getBoolean("background_enabled", false); refreshVoice() }
+ override fun onPause() { visible = false; session++; aiBusy = false; super.onPause() }
  override fun onRequestPermissionsResult(code: Int, permissions: Array<String>, results: IntArray) {
   super.onRequestPermissionsResult(code, permissions, results)
   if (code == 201) {
@@ -111,7 +109,7 @@ class MainActivity : Activity() {
    val text = command.text.toString().trim()
    if (text.isBlank()) { result.text = "Сначала введите команду"; return }
    try {
-    if (openNamedTarget(text)) { result.text = "Выполнено: $text"; return }
+    if (actions.openNamedTarget(text)) { result.text = "Выполнено: $text"; return }
    } catch (e: Exception) { result.text = e.message; return }
    val requestSession = session
    val prefs = getSharedPreferences("ai_proxy", MODE_PRIVATE)
@@ -127,7 +125,7 @@ class MainActivity : Activity() {
       if (proposal.action == "unknown") { aiBusy = false; result.text = "Не удалось распознать команду"; return@runOnUiThread }
       aiBusy = false
       try {
-       executeAi(proposal)
+       actions.executeAi(proposal)
        result.text = "Распознано: $text\nВыполнено: ${proposal.describe()}"
       } catch (e: Exception) {
        result.text = "Не удалось выполнить: ${e.message}"
@@ -141,40 +139,6 @@ class MainActivity : Activity() {
    }
  }
 
- private fun openNamedTarget(raw: String): Boolean {
-  val click = Regex("""^(?:в приложении|открой(?: приложение)?)\s+(.+?)\s*,?\s+(?:и\s+)?нажми\s+(?:на\s+)?(?:кнопку\s+)?(.+)$""", RegexOption.IGNORE_CASE).matchEntire(raw.trim())
-  if (click != null) {
-   val name = click.groupValues[1].trim().trimEnd(',')
-   val label = click.groupValues[2].trim().trimEnd('.', '!', '?').trim('«', '»', '"')
-   val app = findLauncher(name) ?: throw IllegalArgumentException("Приложение «$name» не найдено")
-   val service = requireService(PhoneAccessibilityService.instance)
-   startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(app.packageName, app.name))
-   service.clickAfterLaunch(app.packageName, label)
-   return true
-  }
-  val match = Regex("""^(?:открой|открыть|запусти)\s+(?:(приложение|сайт)\s+)?(.+)$""", RegexOption.IGNORE_CASE).matchEntire(raw.trim()) ?: return false
-  val name = match.groupValues[2].trim().trimEnd('.', '!', '?').lowercase(Locale.ROOT)
-  if (match.groupValues[1].lowercase(Locale.ROOT) == "сайт") {
-   val domain = when (name.replace(" ", "")) {
-    "чатгпт", "чатджипити", "chatgpt" -> "chatgpt.com"
-    else -> name
-   }
-   if (!android.util.Patterns.DOMAIN_NAME.matcher(domain).matches()) throw IllegalArgumentException("Назовите домен сайта")
-   openUrl("https://" + domain)
-   return true
-  }
-  val app = findLauncher(name) ?: return false
-  startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setClassName(app.packageName, app.name))
-  return true
- }
-
- private fun findLauncher(name: String): android.content.pm.ActivityInfo? {
-  val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-  val matches = packageManager.queryIntentActivities(launcher, 0).filter { it.loadLabel(packageManager).toString().trim().equals(name, true) }
-  if (matches.size > 1) throw IllegalArgumentException("Найдено несколько приложений с таким названием")
-  return matches.singleOrNull()?.activityInfo
- }
-
  private fun recognizeSpeech(requestCode: Int) {
    if (listening || aiBusy) return
    try {
@@ -183,7 +147,7 @@ class MainActivity : Activity() {
      putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
      putExtra(RecognizerIntent.EXTRA_PROMPT, "Скажите команду")
     }
-    wake.stop()
+    stopService(Intent(this, WakeService::class.java))
     startActivityForResult(intent, requestCode)
     listening = true
    } catch (e: ActivityNotFoundException) { result.text = "На телефоне нет доступного сервиса распознавания речи." }
@@ -194,6 +158,7 @@ class MainActivity : Activity() {
   super.onActivityResult(requestCode, resultCode, data)
   if (requestCode != speechRequest && requestCode != aiSpeechRequest) return
   listening = false
+  if (visible) refreshVoice()
   if (resultCode == RESULT_OK) {
    val phrase = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
    command.setText(phrase)
@@ -202,52 +167,8 @@ class MainActivity : Activity() {
  }
 
  private fun runCommand(raw: String) {
-  try { if (!openNamedTarget(raw)) execute(raw); result.text = "Команда выполнена: $raw" }
+  try { if (!actions.openNamedTarget(raw)) actions.execute(raw); result.text = "Команда выполнена: $raw" }
   catch (e: Exception) { result.text = "Не удалось выполнить: ${e.message}" }
  }
 
- private fun execute(raw: String) {
-  val s = raw.trim().lowercase(Locale.ROOT)
-  val service = PhoneAccessibilityService.instance
-  when {
-   s.startsWith("2гис") || s.startsWith("2gis") ->
-    openUrl("https://2gis.ru/ufa/search/" + Uri.encode(raw.substringAfter(' ', "Вологодская улица, 11, Уфа")))
-   s.startsWith("карты") || s.startsWith("maps") ->
-    openUrl("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(raw.substringAfter(' ', "Москва")))
-   s.contains("bluetooth") || s.contains("блютуз") -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-   s.contains("wifi") || s.contains("wi-fi") || s.contains("вайфай") -> startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-   s.contains("настройки") -> startActivity(Intent(Settings.ACTION_SETTINGS))
-   s == "назад" || s == "вернись назад" -> requireService(service).goBack()
-   s == "домой" || s == "на главный экран" -> requireService(service).goHome()
-   s == "прокрути вниз" || s == "листай вниз" -> requireService(service).scroll(true)
-   s == "прокрути вверх" || s == "листай вверх" -> requireService(service).scroll(false)
-   s.startsWith("открыть ") -> {
-    val packages = mapOf("telegram" to "org.telegram.messenger", "телеграм" to "org.telegram.messenger", "2гис" to "ru.dublgis.dgismobile", "2gis" to "ru.dublgis.dgismobile", "youtube" to "com.google.android.youtube", "ютуб" to "com.google.android.youtube")
-    val pkg = packages[s.removePrefix("открыть ").trim()] ?: throw IllegalArgumentException("Приложение пока не поддерживается")
-    startActivity(packageManager.getLaunchIntentForPackage(pkg) ?: throw IllegalArgumentException("Приложение не установлено или недоступно"))
-   }
-   else -> throw IllegalArgumentException("Неизвестная команда")
-  }
- }
- private fun executeAi(proposal: AiAction) {
-  when (proposal.action) {
-   "open_app" -> execute("открыть " + proposal.argument)
-   "open_maps" -> openUrl("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(proposal.argument))
-   "open_2gis" -> openUrl("https://2gis.ru/ufa/search/" + Uri.encode(proposal.argument))
-   "settings" -> when (proposal.argument) {
-    "bluetooth" -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
-    "wifi" -> startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-    "general" -> startActivity(Intent(Settings.ACTION_SETTINGS))
-    else -> throw IllegalArgumentException("Недопустимые настройки")
-   }
-   "back" -> requireService(PhoneAccessibilityService.instance).goBack()
-   "home" -> requireService(PhoneAccessibilityService.instance).goHome()
-   "scroll_down" -> requireService(PhoneAccessibilityService.instance).scroll(true)
-   "scroll_up" -> requireService(PhoneAccessibilityService.instance).scroll(false)
-   else -> throw IllegalArgumentException("Неизвестное действие")
-  }
- }
- private fun requireService(service: PhoneAccessibilityService?): PhoneAccessibilityService =
-  service ?: throw IllegalStateException("Сначала включите AI Phone Assistant в настройках специальных возможностей")
- private fun openUrl(url: String) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }
