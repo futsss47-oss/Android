@@ -36,7 +36,14 @@ object DeepSeekClient {
   try {
    val payload = JSONObject().put("command", command).toString().toByteArray(Charsets.UTF_8)
    connection.outputStream.use { it.write(payload) }
-   if (connection.responseCode != 200) throw IllegalStateException("Сервер ответил: ${connection.responseCode}")
+   val status = connection.responseCode
+   if (status != 200) throw IllegalStateException(when (status) {
+    401 -> "Worker отклонил токен доступа (401)"
+    404 -> "По этому адресу нет маршрута /command (404)"
+    502 -> "Worker не получил корректный ответ от DeepSeek (502)"
+    503 -> "В Worker не настроены секреты (503)"
+    else -> "Сервер ответил: $status"
+   })
    val response = connection.inputStream.bufferedReader().use { it.readText() }
    val obj = JSONObject(response)
    val action = obj.getString("action")

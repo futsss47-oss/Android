@@ -9,7 +9,6 @@ import android.provider.Settings
 import android.graphics.Color
 import android.speech.RecognizerIntent
 import android.widget.*
-import android.app.AlertDialog
 import kotlin.concurrent.thread
 import java.util.Locale
 
@@ -19,8 +18,7 @@ class MainActivity : Activity() {
  private val speechRequest = 100
  private val aiSpeechRequest = 101
  private var aiBusy = false
- private lateinit var serverUrl: EditText
- private lateinit var accessToken: EditText
+ private var listening = false
 
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
@@ -31,7 +29,7 @@ class MainActivity : Activity() {
   }
   val heading = TextView(this).apply { text = "AI Phone Assistant · 0.4"; textSize = 24f; setTextColor(Color.BLACK) }
   val instructions = TextView(this).apply {
-   text = "Скажи команду или введи её текстом. DeepSeek предложит действие для подтверждения."
+   text = "Скажи команду или введи её текстом. Поддерживаемая команда выполнится после распознавания."
    textSize = 15f; setPadding(0, 20, 0, 20)
   }
   command = EditText(this).apply { hint = "Введите команду"; minLines = 2 }
@@ -39,34 +37,46 @@ class MainActivity : Activity() {
   val run = Button(this).apply { text = "Выполнить команду" }
   val voice = Button(this).apply { text = "Диктовать текст" }
   val aiVoice = Button(this).apply { text = "🎙 Сказать команду DeepSeek" }
-  val access = Button(this).apply { text = "Включить управление экраном" }
-  val prefs = getSharedPreferences("ai_proxy", MODE_PRIVATE)
-  serverUrl = EditText(this).apply { hint = "HTTPS-адрес личного сервера"; setSingleLine(true); setText(prefs.getString("url", "")) }
-  accessToken = EditText(this).apply { hint = "Токен доступа (не ключ DeepSeek)"; setSingleLine(true); inputType = 129; setText(prefs.getString("token", "")) }
-  val save = Button(this).apply { text = "Сохранить подключение" }
-  val ai = Button(this).apply { text = "Спросить DeepSeek (с подтверждением)" }
+  val settings = Button(this).apply { text = "Настройки" }
+  val ai = Button(this).apply { text = "Выполнить через DeepSeek" }
   root.addView(heading); root.addView(instructions); root.addView(command)
   root.addView(aiVoice); root.addView(ai); root.addView(result)
-  root.addView(voice); root.addView(run); root.addView(access)
-  root.addView(serverUrl); root.addView(accessToken); root.addView(save)
+  root.addView(voice); root.addView(run); root.addView(settings)
   setContentView(ScrollView(this).apply { addView(root) })
   run.setOnClickListener { runCommand(command.text.toString()) }
-  save.setOnClickListener {
-   prefs.edit().putString("url", serverUrl.text.toString().trim()).putString("token", accessToken.text.toString().trim()).apply()
-   result.text = "Подключение сохранено только на телефоне"
-  }
   ai.setOnClickListener { askDeepSeek() }
   voice.setOnClickListener { recognizeSpeech(speechRequest) }
   aiVoice.setOnClickListener { if (!aiBusy) recognizeSpeech(aiSpeechRequest) }
-  access.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+  settings.setOnClickListener { startActivity(Intent(this, ConnectionSettingsActivity::class.java)) }
+  command.setText(savedInstanceState?.getString("command"))
+  listening = savedInstanceState?.getBoolean("listening") ?: false
+  openWidgetCommand(intent)
+ }
+
+ override fun onNewIntent(intent: Intent) {
+  super.onNewIntent(intent)
+  openWidgetCommand(intent)
+ }
+
+ override fun onSaveInstanceState(outState: Bundle) {
+  super.onSaveInstanceState(outState)
+  outState.putString("command", command.text.toString())
+  outState.putBoolean("listening", listening)
+ }
+
+ private fun openWidgetCommand(intent: Intent) {
+  if (!intent.getBooleanExtra("voice_widget", false)) return
+  intent.removeExtra("voice_widget")
+  recognizeSpeech(aiSpeechRequest)
  }
 
  private fun askDeepSeek() {
    if (aiBusy) return
    val text = command.text.toString().trim()
    if (text.isBlank()) { result.text = "Сначала введите команду"; return }
-   val url = serverUrl.text.toString()
-   val token = accessToken.text.toString()
+   val prefs = getSharedPreferences("ai_proxy", MODE_PRIVATE)
+   val url = prefs.getString("url", "").orEmpty()
+   val token = prefs.getString("token", "").orEmpty()
    aiBusy = true
    result.text = "DeepSeek обрабатывает команду..."
    thread {
@@ -75,18 +85,13 @@ class MainActivity : Activity() {
      runOnUiThread {
       if (isFinishing || isDestroyed) return@runOnUiThread
       if (proposal.action == "unknown") { aiBusy = false; result.text = "Не удалось распознать команду"; return@runOnUiThread }
-      AlertDialog.Builder(this)
-       .setTitle("Подтвердить действие?")
-       .setMessage(proposal.describe())
-       .setNegativeButton("Отмена") { _, _ -> result.text = "Отменено" }
-       .setPositiveButton("Выполнить") { _, _ ->
-        try { executeAi(proposal); result.text = "Выполнено: ${proposal.describe()}" }
-        catch (e: Exception) { result.text = "Ошибка: ${e.message}" }
-       }.create().apply {
-        setOnCancelListener { result.text = "Отменено" }
-        setOnDismissListener { aiBusy = false }
-        show()
-       }
+      aiBusy = false
+      try {
+       executeAi(proposal)
+       result.text = "Распознано: $text\nВыполнено: ${proposal.describe()}"
+      } catch (e: Exception) {
+       result.text = "Не удалось выполнить: ${e.message}"
+      }
      }
     } catch (e: Exception) { runOnUiThread {
      aiBusy = false
@@ -96,6 +101,7 @@ class MainActivity : Activity() {
  }
 
  private fun recognizeSpeech(requestCode: Int) {
+   if (listening || aiBusy) return
    try {
     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
      putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -103,13 +109,16 @@ class MainActivity : Activity() {
      putExtra(RecognizerIntent.EXTRA_PROMPT, "Скажите команду")
     }
     startActivityForResult(intent, requestCode)
+    listening = true
    } catch (e: ActivityNotFoundException) { result.text = "На телефоне нет доступного сервиса распознавания речи." }
  }
 
  @Deprecated("Legacy speech recognition callback")
  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
   super.onActivityResult(requestCode, resultCode, data)
-  if ((requestCode == speechRequest || requestCode == aiSpeechRequest) && resultCode == RESULT_OK) {
+  if (requestCode != speechRequest && requestCode != aiSpeechRequest) return
+  listening = false
+  if (resultCode == RESULT_OK) {
    val phrase = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
    command.setText(phrase)
    if (requestCode == aiSpeechRequest) askDeepSeek()
