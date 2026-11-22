@@ -31,21 +31,23 @@ jobs:
         working-directory: ai-phone-assistant
         shell: bash
         env:
-          ASSISTANT_KEYSTORE_BASE64: ${{ secrets.ASSISTANT_KEYSTORE_BASE64 }}
-          ASSISTANT_KEYSTORE_PASSWORD: ${{ secrets.ASSISTANT_KEYSTORE_PASSWORD }}
-          ASSISTANT_KEY_ALIAS: ${{ secrets.ASSISTANT_KEY_ALIAS }}
-          ASSISTANT_KEY_PASSWORD: ${{ secrets.ASSISTANT_KEY_PASSWORD }}
+          ASSISTANT_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          ASSISTANT_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
+          ASSISTANT_KEY_ALIAS: overtime
+          ASSISTANT_KEY_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
         run: |
           if [[ -z "$ASSISTANT_KEYSTORE_BASE64" ]]; then
-            echo "::notice::Release signing is not configured. Only the debug APK was built."
-            exit 0
+            echo "::notice::Release signing is not configured. Required GitHub repository secrets: RELEASE_KEYSTORE_BASE64 and RELEASE_PASSWORD."
+            exit 1
           fi
           umask 077
           export ASSISTANT_KEYSTORE_PATH="$(mktemp "$RUNNER_TEMP/assistant-keystore.XXXXXX")"
           trap 'rm -f "$ASSISTANT_KEYSTORE_PATH"' EXIT
-          printf '%s' "$ASSISTANT_KEYSTORE_BASE64" | base64 --decode > "$ASSISTANT_KEYSTORE_PATH"
+          printf '%s' "$ASSISTANT_KEYSTORE_BASE64" | tr -d ' \r\n' | base64 --decode > "$ASSISTANT_KEYSTORE_PATH"
           unset ASSISTANT_KEYSTORE_BASE64
           gradle :app:assembleRelease --no-daemon
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$signer" verify --print-certs app/build/outputs/apk/release/app-release.apk
           echo "signed=true" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         if: steps.release.outputs.signed == 'true'
