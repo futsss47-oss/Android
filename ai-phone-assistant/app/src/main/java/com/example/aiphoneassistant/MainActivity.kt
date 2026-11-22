@@ -19,6 +19,10 @@ class MainActivity : Activity() {
  private val aiSpeechRequest = 101
  private var aiBusy = false
  private var listening = false
+ private lateinit var wake: ForegroundVoice
+ private var visible = false
+ private var session = 0
+ private lateinit var toggle: Switch
 
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
@@ -27,7 +31,7 @@ class MainActivity : Activity() {
    setPadding(36, 48, 36, 24)
    setBackgroundColor(Color.rgb(245, 247, 250))
   }
-  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.4"; textSize = 24f; setTextColor(Color.BLACK) }
+  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.5"; textSize = 24f; setTextColor(Color.BLACK) }
   val instructions = TextView(this).apply {
    text = "Скажи команду или введи её текстом. Поддерживаемая команда выполнится после распознавания."
    textSize = 15f; setPadding(0, 20, 0, 20)
@@ -39,7 +43,24 @@ class MainActivity : Activity() {
   val aiVoice = Button(this).apply { text = "🎙 Сказать команду DeepSeek" }
   val settings = Button(this).apply { text = "Настройки" }
   val ai = Button(this).apply { text = "Выполнить через DeepSeek" }
-  root.addView(heading); root.addView(instructions); root.addView(command)
+  val prefs = getSharedPreferences("voice_mode", MODE_PRIVATE)
+  wake = ForegroundVoice(this, { phrase ->
+   if (visible && !listening && !aiBusy) {
+    command.setText(phrase)
+    askDeepSeek()
+   }
+  }, { message -> result.text = message })
+  toggle = Switch(this).apply {
+   text = "Слушать «Дипсик» на этом экране"
+   isChecked = prefs.getBoolean("enabled", false)
+   setOnCheckedChangeListener { _, enabled ->
+    prefs.edit().putBoolean("enabled", enabled).apply()
+    if (enabled && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+     requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 201)
+    else refreshVoice()
+   }
+  }
+  root.addView(heading); root.addView(toggle); root.addView(instructions); root.addView(command)
   root.addView(aiVoice); root.addView(ai); root.addView(result)
   root.addView(voice); root.addView(run); root.addView(settings)
   setContentView(ScrollView(this).apply { addView(root) })
@@ -51,6 +72,21 @@ class MainActivity : Activity() {
   command.setText(savedInstanceState?.getString("command"))
   listening = savedInstanceState?.getBoolean("listening") ?: false
   openWidgetCommand(intent)
+ }
+
+ private fun refreshVoice() {
+  wake.stop()
+  if (visible && toggle.isChecked && !listening &&
+   checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) wake.start()
+ }
+ override fun onResume() { super.onResume(); visible = true; refreshVoice() }
+ override fun onPause() { visible = false; session++; aiBusy = false; wake.stop(); super.onPause() }
+ override fun onRequestPermissionsResult(code: Int, permissions: Array<String>, results: IntArray) {
+  super.onRequestPermissionsResult(code, permissions, results)
+  if (code == 201) {
+   if (results.firstOrNull() != android.content.pm.PackageManager.PERMISSION_GRANTED) toggle.isChecked = false
+   refreshVoice()
+  }
  }
 
  override fun onNewIntent(intent: Intent) {
@@ -74,6 +110,10 @@ class MainActivity : Activity() {
    if (aiBusy) return
    val text = command.text.toString().trim()
    if (text.isBlank()) { result.text = "Сначала введите команду"; return }
+   try {
+    if (openNamedTarget(text)) { result.text = "Выполнено: $text"; return }
+   } catch (e: Exception) { result.text = e.message; return }
+   val requestSession = session
    val prefs = getSharedPreferences("ai_proxy", MODE_PRIVATE)
    val url = prefs.getString("url", "").orEmpty()
    val token = prefs.getString("token", "").orEmpty()
@@ -83,7 +123,7 @@ class MainActivity : Activity() {
     try {
      val proposal = DeepSeekClient.parse(url, token, text)
      runOnUiThread {
-      if (isFinishing || isDestroyed) return@runOnUiThread
+      if (isFinishing || isDestroyed || requestSession != session) return@runOnUiThread
       if (proposal.action == "unknown") { aiBusy = false; result.text = "Не удалось распознать команду"; return@runOnUiThread }
       aiBusy = false
       try {
@@ -94,10 +134,31 @@ class MainActivity : Activity() {
       }
      }
     } catch (e: Exception) { runOnUiThread {
+     if (requestSession != session) return@runOnUiThread
      aiBusy = false
      if (!isFinishing && !isDestroyed) result.text = "Ошибка DeepSeek: ${e.message}"
     } }
    }
+ }
+
+ private fun openNamedTarget(raw: String): Boolean {
+  val match = Regex("""^(?:открой|открыть|запусти)\s+(?:(приложение|сайт)\s+)?(.+)$""", RegexOption.IGNORE_CASE).matchEntire(raw.trim()) ?: return false
+  val name = match.groupValues[2].trim().trimEnd('.', '!', '?').lowercase(Locale.ROOT)
+  if (match.groupValues[1].lowercase(Locale.ROOT) == "сайт") {
+   val domain = when (name.replace(" ", "")) {
+    "чатгпт", "чатджипити", "chatgpt" -> "chatgpt.com"
+    else -> name
+   }
+   if (!android.util.Patterns.DOMAIN_NAME.matcher(domain).matches()) throw IllegalArgumentException("Назовите домен сайта")
+   openUrl("https://" + domain)
+   return true
+  }
+  val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+  val matches = packageManager.queryIntentActivities(launcher, 0).filter { it.loadLabel(packageManager).toString().trim().equals(name, true) }
+  if (matches.size > 1) throw IllegalArgumentException("Найдено несколько приложений с таким названием")
+  val app = matches.singleOrNull()?.activityInfo ?: return false
+  startActivity(launcher.setClassName(app.packageName, app.name))
+  return true
  }
 
  private fun recognizeSpeech(requestCode: Int) {
@@ -108,6 +169,7 @@ class MainActivity : Activity() {
      putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
      putExtra(RecognizerIntent.EXTRA_PROMPT, "Скажите команду")
     }
+    wake.stop()
     startActivityForResult(intent, requestCode)
     listening = true
    } catch (e: ActivityNotFoundException) { result.text = "На телефоне нет доступного сервиса распознавания речи." }
@@ -126,7 +188,7 @@ class MainActivity : Activity() {
  }
 
  private fun runCommand(raw: String) {
-  try { execute(raw); result.text = "Команда выполнена: $raw" }
+  try { if (!openNamedTarget(raw)) execute(raw); result.text = "Команда выполнена: $raw" }
   catch (e: Exception) { result.text = "Не удалось выполнить: ${e.message}" }
  }
 
