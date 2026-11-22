@@ -1,7 +1,7 @@
 name: Build AI Phone Assistant APK
 on:
   push:
-    branches: [feature/ai-phone-assistant, feature/ai-phone-assistant-deepseek-03]
+    branches: [feature/ai-phone-assistant, feature/ai-phone-assistant-deepseek-03, feature/ai-phone-assistant-04]
   workflow_dispatch:
 jobs:
   build:
@@ -19,12 +19,37 @@ jobs:
           gradle-version: '8.9'
       - name: Build Android APK
         working-directory: ai-phone-assistant
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: AIPhoneAssistant-debug-apk
           path: ai-phone-assistant/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+      - name: Build signed release APK
+        id: release
+        if: github.ref == 'refs/heads/feature/ai-phone-assistant-04'
+        working-directory: ai-phone-assistant
+        shell: bash
+        env:
+          ASSISTANT_KEYSTORE_BASE64: ${{ secrets.ASSISTANT_KEYSTORE_BASE64 }}
+          ASSISTANT_KEYSTORE_PASSWORD: ${{ secrets.ASSISTANT_KEYSTORE_PASSWORD }}
+          ASSISTANT_KEY_ALIAS: ${{ secrets.ASSISTANT_KEY_ALIAS }}
+          ASSISTANT_KEY_PASSWORD: ${{ secrets.ASSISTANT_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$ASSISTANT_KEYSTORE_BASE64" ]]; then
+            echo "::notice::Release signing is not configured. Only the debug APK was built."
+            exit 0
+          fi
+          umask 077
+          export ASSISTANT_KEYSTORE_PATH="$(mktemp "$RUNNER_TEMP/assistant-keystore.XXXXXX")"
+          trap 'rm -f "$ASSISTANT_KEYSTORE_PATH"' EXIT
+          printf '%s' "$ASSISTANT_KEYSTORE_BASE64" | base64 --decode > "$ASSISTANT_KEYSTORE_PATH"
+          unset ASSISTANT_KEYSTORE_BASE64
+          gradle :app:assembleRelease --no-daemon
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.release.outputs.signed == 'true'
+        with:
+          name: AIPhoneAssistant-release-apk
+          path: ai-phone-assistant/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
