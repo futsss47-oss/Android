@@ -17,6 +17,8 @@ class MainActivity : Activity() {
  private lateinit var command: EditText
  private lateinit var result: TextView
  private val speechRequest = 100
+ private val aiSpeechRequest = 101
+ private var aiBusy = false
  private lateinit var serverUrl: EditText
  private lateinit var accessToken: EditText
 
@@ -27,15 +29,16 @@ class MainActivity : Activity() {
    setPadding(36, 48, 36, 24)
    setBackgroundColor(Color.rgb(245, 247, 250))
   }
-  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.3"; textSize = 24f; setTextColor(Color.BLACK) }
+  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.4"; textSize = 24f; setTextColor(Color.BLACK) }
   val instructions = TextView(this).apply {
-   text = "Голос или текст: 2гис адрес; открыть Telegram; настройки; назад; домой; прокрути вниз. Для управления экраном включи специальную возможность."
+   text = "Скажи команду или введи её текстом. DeepSeek предложит действие для подтверждения."
    textSize = 15f; setPadding(0, 20, 0, 20)
   }
   command = EditText(this).apply { hint = "Введите команду"; minLines = 2 }
   result = TextView(this).apply { text = "Команды выполняются только по вашему нажатию."; setPadding(0, 20, 0, 0) }
   val run = Button(this).apply { text = "Выполнить команду" }
-  val voice = Button(this).apply { text = "🎤 Сказать команду" }
+  val voice = Button(this).apply { text = "Диктовать текст" }
+  val aiVoice = Button(this).apply { text = "🎙 Сказать команду DeepSeek" }
   val access = Button(this).apply { text = "Включить управление экраном" }
   val prefs = getSharedPreferences("ai_proxy", MODE_PRIVATE)
   serverUrl = EditText(this).apply { hint = "HTTPS-адрес личного сервера"; setSingleLine(true); setText(prefs.getString("url", "")) }
@@ -43,25 +46,35 @@ class MainActivity : Activity() {
   val save = Button(this).apply { text = "Сохранить подключение" }
   val ai = Button(this).apply { text = "Спросить DeepSeek (с подтверждением)" }
   root.addView(heading); root.addView(instructions); root.addView(command)
-  root.addView(run); root.addView(voice); root.addView(access)
-  root.addView(serverUrl); root.addView(accessToken); root.addView(save); root.addView(ai); root.addView(result)
+  root.addView(aiVoice); root.addView(ai); root.addView(result)
+  root.addView(voice); root.addView(run); root.addView(access)
+  root.addView(serverUrl); root.addView(accessToken); root.addView(save)
   setContentView(ScrollView(this).apply { addView(root) })
   run.setOnClickListener { runCommand(command.text.toString()) }
   save.setOnClickListener {
    prefs.edit().putString("url", serverUrl.text.toString().trim()).putString("token", accessToken.text.toString().trim()).apply()
    result.text = "Подключение сохранено только на телефоне"
   }
-  ai.setOnClickListener {
+  ai.setOnClickListener { askDeepSeek() }
+  voice.setOnClickListener { recognizeSpeech(speechRequest) }
+  aiVoice.setOnClickListener { if (!aiBusy) recognizeSpeech(aiSpeechRequest) }
+  access.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+ }
+
+ private fun askDeepSeek() {
+   if (aiBusy) return
    val text = command.text.toString().trim()
-   if (text.isBlank()) { result.text = "Сначала введите команду"; return@setOnClickListener }
+   if (text.isBlank()) { result.text = "Сначала введите команду"; return }
    val url = serverUrl.text.toString()
    val token = accessToken.text.toString()
+   aiBusy = true
    result.text = "DeepSeek обрабатывает команду..."
    thread {
     try {
      val proposal = DeepSeekClient.parse(url, token, text)
      runOnUiThread {
-      if (proposal.action == "unknown") { result.text = "Не удалось распознать команду"; return@runOnUiThread }
+      if (isFinishing || isDestroyed) return@runOnUiThread
+      if (proposal.action == "unknown") { aiBusy = false; result.text = "Не удалось распознать команду"; return@runOnUiThread }
       AlertDialog.Builder(this)
        .setTitle("Подтвердить действие?")
        .setMessage(proposal.describe())
@@ -69,31 +82,37 @@ class MainActivity : Activity() {
        .setPositiveButton("Выполнить") { _, _ ->
         try { executeAi(proposal); result.text = "Выполнено: ${proposal.describe()}" }
         catch (e: Exception) { result.text = "Ошибка: ${e.message}" }
-       }.show()
+       }.create().apply {
+        setOnCancelListener { result.text = "Отменено" }
+        setOnDismissListener { aiBusy = false }
+        show()
+       }
      }
-    } catch (e: Exception) { runOnUiThread { result.text = "Ошибка DeepSeek: ${e.message}" } }
+    } catch (e: Exception) { runOnUiThread {
+     aiBusy = false
+     if (!isFinishing && !isDestroyed) result.text = "Ошибка DeepSeek: ${e.message}"
+    } }
    }
-  }
-  voice.setOnClickListener {
+ }
+
+ private fun recognizeSpeech(requestCode: Int) {
    try {
     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
      putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
      putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
      putExtra(RecognizerIntent.EXTRA_PROMPT, "Скажите команду")
     }
-    startActivityForResult(intent, speechRequest)
+    startActivityForResult(intent, requestCode)
    } catch (e: ActivityNotFoundException) { result.text = "На телефоне нет доступного сервиса распознавания речи." }
-  }
-  access.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
  }
 
  @Deprecated("Legacy speech recognition callback")
  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
   super.onActivityResult(requestCode, resultCode, data)
-  if (requestCode == speechRequest && resultCode == RESULT_OK) {
+  if ((requestCode == speechRequest || requestCode == aiSpeechRequest) && resultCode == RESULT_OK) {
    val phrase = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
    command.setText(phrase)
-   runCommand(phrase)
+   if (requestCode == aiSpeechRequest) askDeepSeek()
   }
  }
 
