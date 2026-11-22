@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+ <string name="accessibility_description">Управление кнопками Назад, Домой и прокруткой экрана только после вашей команды. Включается вручную в настройках Android.</string>
+</resources>
