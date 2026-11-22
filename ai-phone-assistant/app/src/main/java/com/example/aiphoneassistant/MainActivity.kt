@@ -1,40 +1,94 @@
 package com.example.aiphoneassistant
+
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.graphics.Color
+import android.speech.RecognizerIntent
 import android.widget.*
+import java.util.Locale
 
 class MainActivity : Activity() {
+ private lateinit var command: EditText
+ private lateinit var result: TextView
+ private val speechRequest = 100
+
  override fun onCreate(savedInstanceState: Bundle?) {
   super.onCreate(savedInstanceState)
-  val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(36,48,36,24); setBackgroundColor(Color.rgb(245,247,250)) }
-  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.1"; textSize = 24f; setTextColor(Color.BLACK) }
-  val instructionsView = TextView(this).apply { text = "Команды: 2гис Вологодская 11; карты Москва; настройки; bluetooth; wifi; открыть Telegram"; textSize = 15f; setPadding(0,20,0,20) }
-  val command = EditText(this).apply { hint = "Введите команду"; setSingleLine(false); minLines = 2 }
-  val result = TextView(this).apply { text = "Команды выполняются только после нажатия кнопки."; setPadding(0,20,0,0) }
+  val root = LinearLayout(this).apply {
+   orientation = LinearLayout.VERTICAL
+   setPadding(36, 48, 36, 24)
+   setBackgroundColor(Color.rgb(245, 247, 250))
+  }
+  val heading = TextView(this).apply { text = "AI Phone Assistant · 0.2"; textSize = 24f; setTextColor(Color.BLACK) }
+  val instructions = TextView(this).apply {
+   text = "Голос или текст: 2гис адрес; открыть Telegram; настройки; назад; домой; прокрути вниз. Для управления экраном включи специальную возможность."
+   textSize = 15f; setPadding(0, 20, 0, 20)
+  }
+  command = EditText(this).apply { hint = "Введите команду"; minLines = 2 }
+  result = TextView(this).apply { text = "Команды выполняются только по вашему нажатию."; setPadding(0, 20, 0, 0) }
   val run = Button(this).apply { text = "Выполнить команду" }
-  root.addView(heading); root.addView(instructionsView); root.addView(command); root.addView(run); root.addView(result)
-  setContentView(root)
-  run.setOnClickListener { try { execute(command.text.toString()); result.text = "Команда отправлена в Android" } catch(e: Exception) { result.text = "Не удалось выполнить: ${e.message}" } }
+  val voice = Button(this).apply { text = "🎤 Сказать команду" }
+  val access = Button(this).apply { text = "Включить управление экраном" }
+  root.addView(heading); root.addView(instructions); root.addView(command)
+  root.addView(run); root.addView(voice); root.addView(access); root.addView(result)
+  setContentView(ScrollView(this).apply { addView(root) })
+  run.setOnClickListener { runCommand(command.text.toString()) }
+  voice.setOnClickListener {
+   try {
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "ru-RU")
+     putExtra(RecognizerIntent.EXTRA_PROMPT, "Скажите команду")
+    }
+    startActivityForResult(intent, speechRequest)
+   } catch (e: ActivityNotFoundException) { result.text = "На телефоне нет доступного сервиса распознавания речи." }
+  }
+  access.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
  }
+
+ @Deprecated("Legacy speech recognition callback")
+ override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+  super.onActivityResult(requestCode, resultCode, data)
+  if (requestCode == speechRequest && resultCode == RESULT_OK) {
+   val phrase = data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() ?: return
+   command.setText(phrase)
+   runCommand(phrase)
+  }
+ }
+
+ private fun runCommand(raw: String) {
+  try { execute(raw); result.text = "Команда выполнена: $raw" }
+  catch (e: Exception) { result.text = "Не удалось выполнить: ${e.message}" }
+ }
+
  private fun execute(raw: String) {
-  val s = raw.trim().lowercase()
+  val s = raw.trim().lowercase(Locale.ROOT)
+  val service = PhoneAccessibilityService.instance
   when {
-   s.startsWith("2гис") || s.startsWith("2gis") -> openUrl("https://2gis.ru/ufa/search/" + Uri.encode(raw.substringAfter(' ', "Вологодская улица, 11, Уфа")))
-   s.startsWith("карты") || s.startsWith("maps") -> openUrl("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(raw.substringAfter(' ', "Москва")))
+   s.startsWith("2гис") || s.startsWith("2gis") ->
+    openUrl("https://2gis.ru/ufa/search/" + Uri.encode(raw.substringAfter(' ', "Вологодская улица, 11, Уфа")))
+   s.startsWith("карты") || s.startsWith("maps") ->
+    openUrl("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(raw.substringAfter(' ', "Москва")))
    s.contains("bluetooth") || s.contains("блютуз") -> startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
    s.contains("wifi") || s.contains("wi-fi") || s.contains("вайфай") -> startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
    s.contains("настройки") -> startActivity(Intent(Settings.ACTION_SETTINGS))
+   s == "назад" || s == "вернись назад" -> requireService(service).goBack()
+   s == "домой" || s == "на главный экран" -> requireService(service).goHome()
+   s == "прокрути вниз" || s == "листай вниз" -> requireService(service).scroll(true)
+   s == "прокрути вверх" || s == "листай вверх" -> requireService(service).scroll(false)
    s.startsWith("открыть ") -> {
-    val packages = mapOf("telegram" to "org.telegram.messenger", "телеграм" to "org.telegram.messenger", "2гис" to "ru.dublgis.dgismobile", "2gis" to "ru.dublgis.dgismobile", "youtube" to "com.google.android.youtube")
+    val packages = mapOf("telegram" to "org.telegram.messenger", "телеграм" to "org.telegram.messenger", "2гис" to "ru.dublgis.dgismobile", "2gis" to "ru.dublgis.dgismobile", "youtube" to "com.google.android.youtube", "ютуб" to "com.google.android.youtube")
     val pkg = packages[s.removePrefix("открыть ").trim()] ?: throw IllegalArgumentException("Приложение пока не поддерживается")
     startActivity(packageManager.getLaunchIntentForPackage(pkg) ?: throw IllegalArgumentException("Приложение не установлено или недоступно"))
    }
    else -> throw IllegalArgumentException("Неизвестная команда")
   }
  }
+ private fun requireService(service: PhoneAccessibilityService?): PhoneAccessibilityService =
+  service ?: throw IllegalStateException("Сначала включите AI Phone Assistant в настройках специальных возможностей")
  private fun openUrl(url: String) { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
 }
