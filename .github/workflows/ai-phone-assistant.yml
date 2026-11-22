@@ -1,0 +1,26 @@
+name: Build AI Phone Assistant APK
+on:
+  push:
+    branches: [feature/ai-phone-assistant]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle :app:assembleDebug --no-daemon
+        working-directory: ai-phone-assistant
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AIPhoneAssistant-debug-apk
+          path: ai-phone-assistant/app/build/outputs/apk/debug/*.apk
