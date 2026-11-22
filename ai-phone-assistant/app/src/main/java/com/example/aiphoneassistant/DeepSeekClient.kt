@@ -21,7 +21,7 @@ data class AiAction(val action: String, val argument: String) {
 object DeepSeekClient {
  fun parse(base: String, token: String, command: String): AiAction {
   val uri = android.net.Uri.parse(base.trim())
-  require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) { "Нужен HTTPS-адрес сервера" }
+  require(uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.encodedAuthority?.contains("@") != true && uri.query == null && uri.fragment == null) { "Нужен HTTPS-адрес сервера" }
   require(token.isNotBlank()) { "Введите токен доступа к серверу" }
   val url = URL(base.trim().trimEnd('/') + "/command")
   val connection = (url.openConnection() as HttpURLConnection).apply {
