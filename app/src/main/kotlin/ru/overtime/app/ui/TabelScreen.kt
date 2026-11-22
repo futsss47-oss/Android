@@ -283,7 +283,8 @@ fun TabelPage(
                 }
             }
         }
-        item { TotalsCard(totals, calc) }
+        item { TotalsCard(totals, calc, settings) }
+        item { OvertimeForecast(month, settings) }
         item { SessionsCard(sessions, now, onAdd, onShare, onSessionClick) }
     }
 
@@ -638,7 +639,9 @@ private fun TabelDay(
 
 /** Итоги табеля таблицей строк; отпускные и больничный — оценкой, если есть. */
 @Composable
-private fun TotalsCard(totals: TabelTotals, calc: MonthCalc) {
+private fun TotalsCard(totals: TabelTotals, calc: MonthCalc, settings: Settings) {
+    var overtimeOpen by rememberSaveable(calc.summary.month.toString()) { mutableStateOf(false) }
+    var weekendOpen by rememberSaveable(calc.summary.month.toString()) { mutableStateOf(false) }
     val leave = calc.leave
     val rows = buildList {
         add(Triple("Явки", "${totals.attendanceDays} дн, ${totals.attendanceHours} ч", false))
@@ -665,11 +668,15 @@ private fun TotalsCard(totals: TabelTotals, calc: MonthCalc) {
             rows.forEachIndexed { i, (label, value, bold) ->
                 if (i > 0) HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    Modifier.fillMaxWidth().then(when (i) {
+                        1 -> Modifier.clickable { overtimeOpen = !overtimeOpen }
+                        2 -> Modifier.clickable { weekendOpen = !weekendOpen }
+                        else -> Modifier
+                    }).padding(vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        label,
+                        label + when (i) { 1 -> if (overtimeOpen) " ▴" else " ▾"; 2 -> if (weekendOpen) " ▴" else " ▾"; else -> "" },
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.weight(1f).padding(end = 12.dp),
                     )
@@ -680,6 +687,20 @@ private fun TotalsCard(totals: TabelTotals, calc: MonthCalc) {
                         maxLines = 1,
                         softWrap = false,
                     )
+                }
+                if ((i == 1 && overtimeOpen) || (i == 2 && weekendOpen)) {
+                    val days = calc.report.days.filter { it.dayOff == (i == 2) && it.countedMinutes > 0 }
+                    if (days.isEmpty()) Hint("Нет записей")
+                    val rate = if (calc.summary.bonusIsManual && calc.summary.bonusBase > 0)
+                        calc.summary.bonus / calc.summary.bonusBase else calc.summary.bonusPercent / 100
+                    for (day in days.sortedBy { it.date }) {
+                        val gross = (day.money + day.nightPay + day.bonusBase * rate) * (1 + settings.districtPercent / 100)
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(day.date.format(TABEL_DAY_FMT) + " · " + hoursLabel(day.countedMinutes) + " ч")
+                            Text("≈ " + formatMoney(gross * (1 - settings.taxPercent / 100)))
+                        }
+                    }
+                    Hint("На руки, с премией, ночными и районным коэффициентом; НДФЛ приблизительно.")
                 }
             }
             if (estimated) {
@@ -954,4 +975,49 @@ private fun shareCsv(ctx: Context, title: String, calc: MonthCalc, sessions: Lis
         .putExtra(Intent.EXTRA_SUBJECT, "Сверхурочные, $title")
         .putExtra(Intent.EXTRA_TEXT, csv)
     ctx.startActivity(Intent.createChooser(send, "Поделиться таблицей"))
+}
+
+@Composable
+private fun OvertimeForecast(month: YearMonth, settings: Settings) {
+    var opened by rememberSaveable { mutableStateOf(false) }
+    var dateText by rememberSaveable(month.toString()) { mutableStateOf((if (YearMonth.now() == month) LocalDate.now() else month.atDay(1)).toString()) }
+    var hoursText by rememberSaveable { mutableStateOf("8") }
+    var nightText by rememberSaveable { mutableStateOf("0") }
+    val ctx = LocalContext.current
+    SoftCard {
+        Row(Modifier.fillMaxWidth().clickable { opened = !opened }.padding(vertical = 8.dp)) {
+            Text("Калькулятор переработки", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(if (opened) "▴" else "▾")
+        }
+        if (opened) {
+            val date = runCatching { LocalDate.parse(dateText) }.getOrElse { month.atDay(1) }
+            OutlinedButton(onClick = {
+                android.app.DatePickerDialog(ctx, { _, y, m, d -> dateText = LocalDate.of(y, m + 1, d).toString() },
+                    date.year, date.monthValue - 1, date.dayOfMonth).show()
+            }) { Text(date.format(TABEL_DAY_FMT) + " " + date.year) }
+            val off = !settings.ruleFor(date).workday
+            Hint(if (off) "Выходной или праздник" else "Рабочий день")
+            OutlinedTextField(hoursText, { hoursText = it }, label = { Text("Часы без обеда") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            if (settings.nightEnabled) OutlinedTextField(nightText, { nightText = it }, label = { Text("Из них ночные часы") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            val h = hoursText.replace(',', '.').toDoubleOrNull()
+            val n = if (settings.nightEnabled) nightText.replace(',', '.').toDoubleOrNull() else 0.0
+            if (h != null && n != null && h in 0.0..24.0 && n in 0.0..h) {
+                val counted = ru.overtime.domain.Calculator.counted(Math.round(h * 60).toInt(), settings)
+                val result = runCatching { ru.overtime.domain.Calculator.money(date, counted, settings) }
+                if (result.isSuccess) {
+                    val base = result.getOrThrow()
+                    val bonus = base * (if (off) Settings.WEEKEND_BONUS_SHARE else 1.0) * settings.bonusPercentFor(YearMonth.from(date)) / 100
+                    val night = minOf(n, counted / 60.0) * settings.hourlyRate(YearMonth.from(date)) * settings.nightPercent / 100
+                    val district = (base + bonus + night) * settings.districtPercent / 100
+                    val gross = base + bonus + night + district
+                    val tax = gross * settings.taxPercent / 100
+                    for ((label, value) in listOf("Оплата" to base, "Премия" to bonus, "Ночные" to night, "Районный коэффициент" to district, "НДФЛ" to -tax)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(label); Text(formatMoney(value)) }
+                    }
+                    Text("На руки ≈ " + formatMoney(gross - tax), style = MaterialTheme.typography.headlineSmall)
+                    Hint("Прогноз по проценту премии. Записи табеля не меняются.")
+                } else Hint("Ошибка формулы оплаты")
+            } else Hint("Введите корректное количество часов")
+        }
+    }
 }
