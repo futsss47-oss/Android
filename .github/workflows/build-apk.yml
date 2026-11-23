@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'feature/**']
   workflow_dispatch:
 
 permissions:
@@ -95,7 +95,7 @@ jobs:
           fi
 
       - name: Выложить скриншоты в ветку ui-snapshots
-        if: steps.shots.outcome == 'success'
+        if: steps.shots.outcome == 'success' && github.ref == 'refs/heads/main'
         continue-on-error: true
         run: |
           SRC=$(pwd)/app/src/test/snapshots/images

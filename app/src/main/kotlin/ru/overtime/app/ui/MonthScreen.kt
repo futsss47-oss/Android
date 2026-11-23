@@ -1,6 +1,11 @@
 package ru.overtime.app.ui
 
 import android.content.Intent
+import android.app.DatePickerDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import java.time.LocalDate
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +22,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.KeyboardArrowRight
@@ -134,6 +142,8 @@ fun MonthScreen(vm: AppViewModel) {
 
         item { AdvanceCard(advance, summary) }
 
+        item { FutureOvertimeCard(month, settings) }
+
         item {
             AbsenceCalendarCard(month, settings, report) { date, a -> vm.setAbsence(date, a) }
         }
@@ -157,25 +167,12 @@ fun MonthScreen(vm: AppViewModel) {
 
         item {
             SoftCard {
-                Text("По дням", style = MaterialTheme.typography.titleMedium)
-                if (report.days.isEmpty()) Hint("За этот месяц сверхурочной нет")
-                for (day in report.days) {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("${day.date.format(DAY_FMT)}, ${dayShort(day.date)}")
-                            if (day.rawMinutes != day.countedMinutes) Hint("факт ${formatMinutes(day.rawMinutes)}")
-                        }
-                        if (day.dayOff) {
-                            Pill("выходной", MaterialTheme.colorScheme.tertiaryContainer)
-                            Spacer(Modifier.width(8.dp))
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(formatMinutes(day.countedMinutes), style = MaterialTheme.typography.titleSmall)
-                            Text("≈ " + formatMoney(day.net), style = MaterialTheme.typography.bodyMedium)
-                            Hint("начисл. ${formatMoney(day.withBonus)}")
-                        }
-                    }
-                }
+                Text("По дням · на руки", style = MaterialTheme.typography.titleMedium)
+                PayDaysSection("Сверхурочные", report.days.filter { !it.dayOff }, summary, settings.districtPercent, settings.taxPercent)
+                PayDaysSection("Выходные и праздники", report.days.filter { it.dayOff }, summary, settings.districtPercent, settings.taxPercent)
+                Hint("Суммы ориентировочные: НДФЛ в расчётном листке округляется за месяц.")
+                if (summary.bonusIsManual) Hint("Премия из листка распределена пропорционально базе премии.")
+                report.formulaError?.let { Text("Ошибка в формуле: $it", color = MaterialTheme.colorScheme.error) }
             }
         }
 
@@ -380,4 +377,137 @@ private fun shareCsv(
         .putExtra(Intent.EXTRA_SUBJECT, "Сверхурочные, $title")
         .putExtra(Intent.EXTRA_TEXT, csv)
     ctx.startActivity(Intent.createChooser(send, "Поделиться таблицей"))
+}
+
+/** Детализация оплаты переработок без включения обычного оклада. */
+@Composable
+private fun PayDaysSection(
+    title: String,
+    days: List<ru.overtime.domain.DayResult>,
+    summary: ru.overtime.domain.MonthSummary,
+    districtPercent: Double,
+    taxPercent: Double,
+) {
+    var expanded by rememberSaveable(summary.month.toString(), title) { mutableStateOf(false) }
+    val bonusRate = if (summary.bonusIsManual) {
+        if (summary.bonusBase > 0.0) summary.bonus / summary.bonusBase else 0.0
+    } else summary.bonusPercent / 100.0
+    fun gross(day: ru.overtime.domain.DayResult): Double =
+        (day.money + day.bonusBase * bonusRate) * (1.0 + districtPercent / 100.0)
+    fun net(day: ru.overtime.domain.DayResult): Double =
+        Math.round(gross(day) * (1.0 - taxPercent / 100.0) * 100.0) / 100.0
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .clickable { expanded = !expanded }.padding(vertical = 10.dp, horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Hint(formatMinutes(days.sumOf { it.countedMinutes }))
+        }
+        Text("≈ " + formatMoney(days.sumOf { net(it) }), style = MaterialTheme.typography.titleSmall)
+        Icon(
+            if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+            contentDescription = if (expanded) "Свернуть" else "Раскрыть",
+        )
+    }
+    if (expanded) {
+        if (days.isEmpty()) Hint("Нет записей")
+        for (day in days.sortedBy { it.date }) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${day.date.format(DAY_FMT)}, ${dayShort(day.date)}")
+                    Hint(formatMinutes(day.countedMinutes))
+                    Hint("Премия ${formatMoney(day.bonusBase * bonusRate)}")
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("≈ " + formatMoney(net(day)), color = MaterialTheme.colorScheme.primary)
+                    Hint("Начислено ${formatMoney(gross(day))}")
+                    Hint("НДФЛ −${formatMoney(gross(day) - net(day))}")
+                }
+            }
+        }
+    }
+}
+
+/** Пробный расчёт отдельного дня, не изменяющий записи табеля. */
+@Composable
+private fun FutureOvertimeCard(month: YearMonth, settings: ru.overtime.domain.Settings) {
+    val ctx = LocalContext.current
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    var dateText by rememberSaveable(month.toString()) {
+        mutableStateOf((if (YearMonth.now() == month) LocalDate.now() else month.atDay(1)).toString())
+    }
+    val date = LocalDate.parse(dateText)
+    var hoursText by rememberSaveable { mutableStateOf("8") }
+    val hours = hoursText.trim().replace(',', '.').toDoubleOrNull()
+    val valid = hours != null && hours.isFinite() && hours in 0.0..24.0
+    val dayOff = !settings.ruleFor(date).workday
+    SoftCard {
+        Row(
+            Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Калькулятор переработки", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Icon(if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                contentDescription = if (expanded) "Свернуть" else "Раскрыть")
+        }
+        if (expanded) {
+            OutlinedButton(onClick = {
+                DatePickerDialog(ctx, { _, y, m, d ->
+                    dateText = LocalDate.of(y, m + 1, d).toString()
+                }, date.year, date.monthValue - 1, date.dayOfMonth).show()
+            }, modifier = Modifier.fillMaxWidth()) {
+                Text("${date.format(DAY_FMT)} ${date.year} · ${dayShort(date)}")
+            }
+            Hint(if (dayOff) "Выходной или праздник" else "Рабочий день")
+            OutlinedTextField(
+                value = hoursText, onValueChange = { hoursText = it },
+                label = { Text("Часы переработки без обеда") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                singleLine = true, isError = !valid, modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (h in listOf("2", "4", "8", "12")) {
+                    TextButton(onClick = { hoursText = h }, modifier = Modifier.weight(1f)) { Text("$h ч") }
+                }
+            }
+            if (!valid) {
+                Hint("Введите число часов от 0 до 24")
+            } else {
+                val counted = Calculator.counted(Math.round(hours!! * 60.0).toInt(), settings)
+                val amount = runCatching { Calculator.money(date, counted, settings) }
+                if (amount.isFailure) {
+                    Text("Ошибка формулы оплаты", color = MaterialTheme.colorScheme.error)
+                } else {
+                    val base = amount.getOrThrow()
+                    val bonusBase = if (dayOff) base * ru.overtime.domain.Settings.WEEKEND_BONUS_SHARE else base
+                    val percent = settings.bonusPercentFor(YearMonth.from(date))
+                    val bonus = bonusBase * percent / 100.0
+                    val district = (base + bonus) * settings.districtPercent / 100.0
+                    val gross = base + bonus + district
+                    val tax = gross * settings.taxPercent / 100.0
+                    Hint("К оплате: ${formatMinutes(counted)}")
+                    for ((label, value) in listOf(
+                        "Оплата по формуле" to base,
+                        "Премия" to bonus,
+                        "Районный коэффициент" to district,
+                        "Начислено" to gross,
+                        "НДФЛ" to -tax,
+                    )) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(label, modifier = Modifier.weight(1f))
+                            Text(formatMoney(value))
+                        }
+                    }
+                    Text("На руки ≈ ${formatMoney(gross - tax)}", style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.primary)
+                    if (settings.bonusSumOverride(YearMonth.from(date)) != null) {
+                        Hint("Для прогноза используется процент премии, а не фиксированная сумма из листка.")
+                    }
+                }
+            }
+            Hint("Прогноз отдельного дня. Не добавляется в табель; НДФЛ рассчитан приблизительно.")
+        }
+    }
 }
