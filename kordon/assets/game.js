@@ -50,9 +50,10 @@ function route(){
 }
 function options(){
  if(s.drive)return [{label:"Выйти из машины",fn:()=>{
+  if(Math.abs(s.car.speed||0)>20)return say("Сначала останови машину");
   const walls=solids();
   for(let i=0;i<8;i++){let a=s.car.ang+Math.PI/2+i*Math.PI/4,x=s.car.x+Math.cos(a)*32,y=s.car.y+Math.sin(a)*32;
-   if(!blocked(x,y,7,walls)){s.drive=false;Object.assign(s.p,{x,y});return}}
+   if(!blocked(x,y,7,walls)){s.drive=false;s.car.speed=0;Object.assign(s.p,{x,y});return}}
   say("Подъедь к свободному месту");
  }}];
  if(s.hidden>=0)return [{label:"Выйти из укрытия",fn:()=>{Object.assign(s.p,doors(s.hidden));s.hidden=-1;s.hurt=1.5}}];
@@ -66,12 +67,12 @@ function options(){
   if(!s.car.hp){if(!s.parts)return say("Нужна деталь из мастерской");s.parts--;s.car.hp=100;s.xp[1]++;say("Двигатель запустился")}else{s.drive=true;Object.assign(s.p,s.car);s.noise=2}
  });
  near(gate,s.gate?"Открыть ворота":"Закрыть ворота",()=>{
-  if(!s.gate && [s.p,s.car,...s.z].some(v=>v.x>1065&&v.x<1155&&Math.abs(v.y-412)<13))return say("Освободи проём ворот");
+  if(!s.gate && (carOverRect([1072,407,77,10])||[s.p,...s.z].some(v=>v.x>1065&&v.x<1155&&Math.abs(v.y-412)<13)))return say("Освободи проём ворот");
   s.gate=!s.gate;say(s.gate?"Ворота закрыты":"Ворота открыты")
  });
  breaches.forEach((b,i)=>{if(!s.walls[i])near(b,"Забор · 1 доска",()=>{
   if(!s.wood)return say("Возьми доски у штабеля на дороге");
-  if([s.p,s.car,...s.z].some(v=>Math.abs(v.x-b.x)<23&&Math.abs(v.y-b.y)<13))return say("Отойди на шаг от пролома");
+  if(carOverRect([b.x-17,407,34,10])||[s.p,...s.z].some(v=>Math.abs(v.x-b.x)<23&&Math.abs(v.y-b.y)<13))return say("Отойди на шаг от пролома");
   s.walls[i]=true;s.wood--;s.xp[2]++;say("Пролом заделан");
  },38)});
  near({x:1204,y:223},s.generator?"Осмотреть генератор":"Починить генератор",()=>{
@@ -122,11 +123,11 @@ function tick(dt){
  s.time+=dt;s.hurt=Math.max(0,s.hurt-dt);s.noise=Math.max(0,s.noise-dt);
  const walls=solids();let dx=jx+Number(keys.has("KeyD")||keys.has("ArrowRight"))-Number(keys.has("KeyA")||keys.has("ArrowLeft")),dy=jy+Number(keys.has("KeyS")||keys.has("ArrowDown"))-Number(keys.has("KeyW")||keys.has("ArrowUp"));
  let n=Math.hypot(dx,dy);if(n>1){dx/=n;dy/=n}
- if(n>.05&&s.hidden<0){
-  let speed=s.drive?176+level(1)*7:85+level(0)*4;
-  if(s.drive){s.car.ang=Math.atan2(dy,dx);move(s.car,dx*speed*dt,dy*speed*dt,19,walls);Object.assign(s.p,{x:s.car.x,y:s.car.y,ang:s.car.ang});s.noise=1}
-  else{s.p.ang=Math.atan2(dy,dx);move(s.p,dx*speed*dt,dy*speed*dt,7,walls)}
-  stepPhase+=dt*12;
+ if(s.drive)driveStep(dx,dy,dt,walls);
+ else if(n>.05&&s.hidden<0){
+  const speed=85+level(0)*4,oldX=s.p.x,oldY=s.p.y;s.p.ang=Math.atan2(dy,dx);
+  move(s.p,dx*speed*dt,dy*speed*dt,7,walls);
+  stepPhase+=Math.hypot(s.p.x-oldX,s.p.y-oldY)*.18;
  }
  s.sat=Math.max(0,s.sat-dt*(s.hidden>=0?.035:.09));
  if(!s.sat)s.hp-=dt*.35;
@@ -134,11 +135,11 @@ function tick(dt){
  for(let i=0;i<s.z.length;i++){
   const z=s.z[i],d=dist(z,s.p),alert=s.hidden<0&&d<(s.noise?370:153)&& (s.noise||sight(z,s.p,walls));
   if(alert){z.lastX=s.p.x;z.lastY=s.p.y;z.until=s.time+4}
-  if(s.hidden<0&&z.until>s.time&&Math.hypot(z.lastX-z.x,z.lastY-z.y)>4)steer(z,z.lastX-z.x,z.lastY-z.y,38+3*(i%3),dt,walls);
+  if(s.hidden<0&&z.until>s.time&&Math.hypot(z.lastX-z.x,z.lastY-z.y)>4)chase(z,{x:z.lastX,y:z.lastY},38+3*(i%3),dt,walls);
   else{let a=i*3+Math.floor((s.time+9*i)/12)*1.9;steer(z,Math.cos(a),Math.sin(a),6,dt,walls)}
   if(s.hidden<0&&d<(s.drive?29:16)&&s.hurt===0&&sight(z,s.p,walls)){
    s.hurt=1.3;
-   if(s.drive){s.car.hp=Math.max(0,s.car.hp-(14-2*level(1)));if(!s.car.hp){s.drive=false;say("Машина заглохла")}}
+   if(s.drive){s.car.hp=Math.max(0,s.car.hp-(14-2*level(1)));if(!s.car.hp){s.drive=false;s.car.speed=0;say("Машина заглохла")}}
    else{s.hp-=12;say("Ранение! Уходи в укрытие")}
   }
  }
@@ -149,7 +150,7 @@ function tick(dt){
 function hud(){
  $("hp").value=s.hp;$("sat").value=s.sat;$("area").textContent=s.hidden>=0?buildings[s.hidden].name.toUpperCase():s.p.x>960?"ЛЕСНОЙ КОРДОН":"ПРИДОРОЖНЫЙ ПОСЁЛОК";
  let mins=16*60+Math.floor(s.time*3);$("clock").textContent="День "+(1+Math.floor(mins/1440))+" · "+String(Math.floor(mins/60)%24).padStart(2,"0")+":"+String(mins%60).padStart(2,"0");
- let a=options()[0];$("use").disabled=!a;$("use").textContent=a?a.label:"Нет действия";
+ let a=options()[0];if(s.drive)$("area").textContent="УНИВЕРСАЛ · "+Math.round(Math.abs(s.car.speed||0)*.36)+" КМ/Ч · "+s.car.hp+"%";$("use").disabled=!a;$("use").textContent=a?a.label:"Нет действия";
  $("fire").textContent="Огонь · "+s.ammo;$("eat").textContent="Еда · "+s.food;
  let [to,task]=route();$("target").textContent=s.hidden>=0?"В укрытии · здоровье восстанавливается":task+" · "+Math.round(dist(to,s.p)/10)+" м";
 }

@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -18,7 +19,16 @@ jobs:
       - name: Android SDK 35
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
-      - name: Подпись двух последовательных версий
+      - name: Получить предыдущий релиз для проверки обновления
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN=$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/runs" -f branch=game/kordon-android -f status=success -f per_page=50 --jq '.workflow_runs[] | select(.path == ".github/workflows/kordon-release.yml") | .id' | sed -n '1p')
+          test -n "$RUN"
+          gh run download "$RUN" --name Lesnoy-Kordon-release --dir "$RUNNER_TEMP/previous"
+          mv "$RUNNER_TEMP/previous/Lesnoy-Kordon.apk" "$RUNNER_TEMP/previous.apk"
+      - name: Подпись релиза и сверка сертификата
         env:
           STORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           SIGNING_PASSWORD: ${{ secrets.RELEASE_PASSWORD }}
@@ -30,7 +40,6 @@ jobs:
           umask 077
           printf '%s' "$STORE_B64" | base64 --decode > "$SIGNING_STORE"
           CODE=$((2*GITHUB_RUN_NUMBER))
-          bash kordon/build.sh "$((CODE-1))" "$RUNNER_TEMP/previous.apk"
           bash kordon/build.sh "$CODE" "$RUNNER_TEMP/Lesnoy-Kordon.apk"
           SIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           fingerprint() { "$SIGNER" verify --print-certs "$1" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p'; }
