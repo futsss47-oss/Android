@@ -1,7 +1,7 @@
 name: Лесной кордон • Android
 on:
   push:
-    branches: [game/lesnoy-kordon]
+    branches: [game/kordon-android]
     paths: ['kordon/**', '.github/workflows/kordon-release.yml']
   workflow_dispatch:
 permissions:
