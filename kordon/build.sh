@@ -10,7 +10,7 @@ bt="$ANDROID_HOME/build-tools/35.0.0"
 platform="$ANDROID_HOME/platforms/android-35/android.jar"
 mkdir -p "$tmp/classes" "$tmp/dex" "$(dirname "$out")"
 "$bt/aapt2" compile --dir res -o "$tmp/res.zip"
-"$bt/aapt2" link -I "$platform" --manifest AndroidManifest.xml --version-code "$code" --version-name "0.1.$code" -A assets -o "$tmp/base.apk" "$tmp/res.zip"
+"$bt/aapt2" link -I "$platform" --manifest AndroidManifest.xml --version-code "$code" --version-name "0.2.$code" -A assets -o "$tmp/base.apk" "$tmp/res.zip"
 javac --release 8 -classpath "$platform" -d "$tmp/classes" src/ru/futsss47/kordon/GameActivity.java
 jar cf "$tmp/classes.jar" -C "$tmp/classes" .
 "$bt/d8" --release --min-api 24 --lib "$platform" --output "$tmp/dex" "$tmp/classes.jar"
