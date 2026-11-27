@@ -5,3 +5,7 @@
 #actions button,.plate,.right,#target{background:#242820d9;border:1px solid #b1a58180;box-shadow:0 2px 6px #15190e59}
 #actions #use{background:#d9b579;color:#25251e}#actions #use:disabled{background:#383d34dd;color:#a8ac9f}
 #stick{width:85px;height:85px;background:radial-gradient(circle,#262b21a8,#30332b40);border:1px solid #d6c9a585}
+
+#map{display:block;width:100%;height:auto;max-height:17vh;margin:8px 0;border:1px solid #a7986e60}#menu section{overscroll-behavior:contain}#menu section *{touch-action:pan-y}
+
+#sprint{position:absolute;left:max(19px,env(safe-area-inset-left));bottom:110px;min-height:34px;background:#29392ddb;color:#e3ddbd;font-size:12px;padding:4px 10px}#sprint:active{background:#797044}#sprint:disabled{opacity:.55}

@@ -6,10 +6,10 @@ const contact = new SAT.Response();
 let staticKey = "", collisionWalls = [], navOpen, navFields = new Map();
 const CELL=12,COLS=Math.ceil(W/CELL),ROWS=Math.ceil(H/CELL);
 function prepWalls(walls) {
- const key=[s.gate,...s.walls,...s.extra.map(v=>v.x+","+v.y)].join(";");
+ const key=[s.bridge,s.gate,...s.walls,...s.extra.map(v=>v.x+","+v.y)].join(";");
  if(key===staticKey)return;
  staticKey=key;
- collisionWalls=walls.map(([x,y,w,h])=>({x,y,w,h,body:new SAT.Box(vec(x,y),w,h).toPolygon()}));
+ collisionWalls=[...walls,[2240,873,144,22]].map(([x,y,w,h])=>({x,y,w,h,body:new SAT.Box(vec(x,y),w,h).toPolygon()}));
  navFields.clear();navOpen=null;
 }
 function carTouches(x,y,angle,walls) {

@@ -1,7 +1,7 @@
 "use strict";
 const world=$("world"),ctx=world.getContext("2d",{alpha:false});
 const land=document.createElement("canvas"),g=land.getContext("2d");
-const DETAIL=1.6;land.width=Math.ceil(W*DETAIL);land.height=Math.ceil(H*DETAIL);
+const DETAIL=1.1;land.width=Math.ceil(W*DETAIL);land.height=Math.ceil(H*DETAIL);
 const art={};let seed=918273;
 function rand(){seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296}
 function rect(c,x,y,w,h,color){c.fillStyle=color;c.fillRect(x,y,w,h)}
@@ -67,32 +67,40 @@ function makeLand(){
   const x=rand()*W,y=rand()*H;if(y>495&&y<579&&rand()>.08)continue;
   oval(g,x,y,1.1+rand()*1.7,.45+rand()*.6,["#b18c48a8","#c8a05d70","#54483088","#837f5966"][i%4])
  }
- for(let i=0;i<440;i++){let x=rand()*W,y=rand()*H;if(y>455&&y<612||buildings.some(b=>x>b.x-42&&x<b.x+b.w+35&&y>b.y-55&&y<b.y+b.h+38)||x>931&&x<1480&&y<447)continue;if(x<100||y<110||y>750||x>1480||rand()<.11)tree(x,y,17+rand()*20)}
+ for(let i=0;i<980;i++){let x=rand()*W,y=rand()*H;if(y>455&&y<612||buildings.some(b=>x>b.x-42&&x<b.x+b.w+35&&y>b.y-55&&y<b.y+b.h+38)||x>931&&x<1480&&y<447)continue;if(x<100||y<110||y>750||x>1480||rand()<.11)tree(x,y,17+rand()*20)}
  [[155,412,0],[168,413,0],[141,402,1],[288,370,1],[294,380,1],[454,411,2],[562,377,1],[1254,255,2],[1194,271,0],[980,556,2],[1011,553,2],[1003,561,2],[577,711,0]].forEach(args=>scrap(...args));
  buildings.forEach(b=>{
-  const image=b.kind==="garage"||b.kind==="shop"?art.garage:art.cabin;
+  const image=art.roof;
   g.save();g.shadowColor="#1c211abf";g.shadowBlur=5;g.shadowOffsetX=7;g.shadowOffsetY=10;
-  if(b.kind==="shop")g.filter="sepia(.52)";
-  g.drawImage(image,b.x-6,b.y-17,b.w+12,b.h+23);g.restore()
+  if(["farm","home","clinic"].includes(b.kind))g.filter="sepia(.65) brightness(1.08)";
+  g.drawImage(image,b.x-3,b.y-3,b.w+6,b.h+6);g.restore()
  });
+ riverScene();
  rails.forEach(a=>plank(g,...a));
  for(let i=0;i<3;i++){rect(g,1212,293+i*15,74,11,texture("earth",.44));line(g,1214,300+i*15,1283,300+i*15,"#342b2099",2.5)}
  rect(g,1352,286,60,55,texture("litter",.40));for(let i=0;i<=60;i+=5)line(g,1352+i,286,1352+i,340,"#a0a59b69",.6);for(let i=0;i<=55;i+=5)line(g,1352,286+i,1412,286+i,"#9ea29a6c",.6);plank(g,1351,285,64,4);plank(g,1351,340,64,4);
- g.drawImage(art.cabin,1386,269,36,31);
+ g.drawImage(art.roof,1386,269,36,31);
  rect(g,1193,212,24,17,"#47574c");for(let j=0;j<4;j++)rect(g,1196+4*j,217,2,7,"#232e2e");
 }
 function figure(x,y,a,alive,i){
- const phase=alive?stepPhase:s.time*6+i,side=Math.abs(Math.cos(a))>.58;
- const idle=alive&&!keys.size&&Math.hypot(jx,jy)<.10;
- const frame=idle?(Math.sin(a)<-.35?"N":"S"):side?(Math.sin(phase)>0?"1":"2"):Math.sin(a)>0?"S":"N";
- const sprite=art[(alive?"runner":"walker")+frame],h=(alive?34:33)+Math.sin(phase)*.55,w=h*sprite.width/sprite.height;
- ctx.save();ctx.translate(x,y);oval(ctx,2,1,9,3.1,"#1b211aa1");
- if(side&&Math.cos(a)<0)ctx.scale(-1,1);
- ctx.drawImage(sprite,-w*.5,-h+3,w,h);ctx.restore()
+ const npc=i===-2,pose=alive?stepPhase:(s.z[i].stride||0),stride=npc?0:alive&&!s.stepping?0:Math.sin(pose);
+ ctx.save();ctx.translate(x,y);oval(ctx,1.8,2,6.6,4.7,"#19221bb8");ctx.rotate(a);
+ ctx.lineCap="round";
+ for(const side of [-1,1]){
+  const swing=side*stride;
+  line(ctx,-1,side*2.7,swing*6-1,side*3.3,"#383d34",3.1);
+  line(ctx,swing*6-1,side*3.3,swing*6+1,side*3.3,"#282b27",2.4);
+  const reach=alive?1-swing*4:4.7-swing*2.8;
+  line(ctx,-1,side*4,reach,side*5,alive?"#ae8349":"#854d42",2.6);
+  oval(ctx,reach+1,side*5,1.25,1.05,alive?"#d0ab85":"#b0a998")
+ }
+ ctx.rotate(stride*(alive?.15:.19));if(npc)ctx.filter="sepia(.65)";
+ ctx.drawImage(alive?art.survivor:art.infected,-5.2,-4.8,10.4,9.6);ctx.restore()
 }
+
 function car(){
- const c=s.car;ctx.save();ctx.translate(c.x,c.y);ctx.rotate(c.ang);
- oval(ctx,1,3,27,11,"#141a1677");ctx.drawImage(art.wagon,-28,-14,56,28);
+ const c=s.car;ctx.save();ctx.translate(c.x,c.y);oval(ctx,2,2,25,11,"#19221968");ctx.rotate(c.ang);
+ ctx.drawImage(art.estate,-27,-12,54,24);
  if(!c.hp){const t=s.time*.8;for(let i=0;i<3;i++){let f=(t+i/3)%1;oval(ctx,17+4*f,-3-10*f,2+3*f,2+3*f,"rgba(95,94,83,"+(.35*(1-f))+")")}}
  ctx.restore()
 }
@@ -118,16 +126,16 @@ function frame(now){
  if(now-uiAt>150){hud();uiAt=now}
  let cw=world.clientWidth,ch=world.clientHeight,dpr=Math.min(window.devicePixelRatio||1,2);
  if(world.width!==Math.round(cw*dpr)||world.height!==Math.round(ch*dpr)){world.width=Math.round(cw*dpr);world.height=Math.round(ch*dpr)}
- let scale=Math.max(.72,Math.min(3.2,Math.min(cw/430,ch/238)));
+ let scale=viewZoom*Math.max(.72,Math.min(3.2,Math.min(cw/430,ch/238)));
  let vw=cw/scale,vh=ch/scale,cx=clamp(s.p.x-vw*.48,0,Math.max(0,W-vw)),cy=clamp(s.p.y-vh*.53,0,Math.max(0,H-vh));
  ctx.setTransform(scale*dpr,0,0,scale*dpr,-cx*scale*dpr,-cy*scale*dpr);ctx.drawImage(land,0,0,W,H);
  if(s.gate)plank(ctx,1072,407,77,10);else{plank(ctx,1073,382,7,30);plank(ctx,1143,382,7,30)}
  breaches.forEach((v,i)=>{if(s.walls[i])plank(ctx,v.x-17,407,34,10);else{line(ctx,v.x-10,408,v.x+3,421,"#a29168",4);line(ctx,v.x,408,v.x+12,416,"#736a4b",4)}});
  s.extra.forEach(b=>plank(ctx,b.x-18,b.y-4,36,8));
  if(s.crop!==null)for(let i=0;i<18;i++){let r=1.5+Math.min(1,(s.time-s.crop)/35)*2.8,x=1218+i%6*12,y=298+Math.floor(i/6)*15;oval(ctx,x,y,r+1,r,"#45633b");oval(ctx,x-1,y-1,r*.7,r*.65,"#88a25c")}
- chicken();car();headlights();
+ renderDistrict();chicken();car();headlights();if(s.hidden>=0)roomView(s.hidden);
  for(let i=0;i<s.z.length;i++){let z=s.z[i];figure(z.x,z.y,z.ang,false,i)}
- if(!s.drive&&s.hidden<0){ctx.strokeStyle=s.hurt>0?"#fa8e69":"#f5da977f";ctx.lineWidth=1.2;ctx.beginPath();ctx.ellipse(s.p.x,s.p.y+2,12,10,0,0,Math.PI*2);ctx.stroke();figure(s.p.x,s.p.y,s.p.ang,true,0)}
+ if(!s.drive){ctx.strokeStyle=s.hurt>0?"#fa8e69":"#f5da977f";ctx.lineWidth=1.2;ctx.beginPath();ctx.ellipse(s.p.x,s.p.y+2,8,7,0,0,Math.PI*2);ctx.stroke();figure(s.p.x,s.p.y,s.p.ang,true,0)}
  if(flash&&s.time<flash.t)line(ctx,s.p.x,s.p.y,flash.x,flash.y,"#ffd76c",2);
  let minutes=(960+s.time*3)%1440,night=Math.max(0,Math.cos(minutes/1440*Math.PI*2));
  if(night)rect(ctx,cx,cy,vw,vh,"rgba(12,26,45,"+(night*.41)+")");
@@ -138,10 +146,10 @@ function frame(now){
  if(dist(s.p,s.car)<150&&!s.drive)label(s.car.x,s.car.y-23,s.car.hp?"Универсал":s.parts?"Можно починить":"Универсал · поломка");
  if(dist(s.p,garden)<180){label(garden.x,282,"Огород");label(coop.x,271,"Курятник")}
  if(dist(s.p,timber)<140)label(timber.x,timber.y-10,"Штабель досок");
- let [dest]=route();if(s.hidden<0&&!s.won){let x=clamp(dest.x,cx+22,cx+vw-22),y=clamp(dest.y,cy+58/scale,cy+vh-60/scale);ctx.save();ctx.translate(x,y-2);ctx.rotate(Math.PI/4);ctx.strokeStyle="#f6cf73";ctx.lineWidth=1.5;ctx.strokeRect(-5,-5,10,10);ctx.restore()}
+ let [dest]=route();if(s.hidden<0&&!s.ending){let x=clamp(dest.x,cx+22,cx+vw-22),y=clamp(dest.y,cy+58/scale,cy+vh-60/scale);ctx.save();ctx.translate(x,y-2);ctx.rotate(Math.PI/4);ctx.strokeStyle="#f6cf73";ctx.lineWidth=1.5;ctx.strokeRect(-5,-5,10,10);ctx.restore()}
  requestAnimationFrame(frame)
 }
-const names=["cabin","garage","birch","wagon","grass","asphalt","earth","litter","runner1","runner2","runnerS","runnerN","walker1","walker2","walkerS","walkerN"];
+const names=["roof","estate","survivor","infected","birch","grass","asphalt","earth","litter"];
 const startButton=$("resume");startButton.disabled=true;
 Promise.all(names.map(name=>new Promise((resolve,reject)=>{
  const img=new Image();img.onload=()=>{art[name]=img;resolve()};img.onerror=()=>reject(new Error(name));img.src="art/"+name+".webp";
