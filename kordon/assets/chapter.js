@@ -71,7 +71,7 @@ function insideActions(){
   if(!s.looted.includes(i)){const [f,a,p,w]=buildings[i].loot;s.food+=f;s.ammo+=a;s.parts+=p;s.wood+=w;s.looted.push(i);s.xp[0]++;say("Припасы: еда +"+f+" · патроны +"+a+" · детали +"+p)}
   else if(i===0&&!s.parts){s.parts++;say("Разобран старый насос: деталь +1")}else say("Припасы уже собраны")
  }});
- if(dist(s.p,roomExit(i))<36)items.push({label:"Выйти наружу",fn:()=>{Object.assign(s.p,doors(i));s.hidden=-1;s.hurt=1}});
+ if(dist(s.p,roomExit(i))<36)items.push({label:"Выйти наружу",fn:()=>{Object.assign(s.p,doors(i));if(s.companion)Object.assign(s.companion,doors(i));s.hidden=-1;s.hurt=1}});
  return items;
 }
 function followCompanion(dt,walls){
